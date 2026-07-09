@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.1.1}"
 ARCH="$(uname -m | sed 's/x86_64/x64/')"
 DIST="dist/crossbean-macos-$ARCH"
 APP="dist/Crossbean.app"

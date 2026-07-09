@@ -4,7 +4,7 @@
 ; and optionally packaging\windows\icon.ico (generated from assets\icon.svg).
 
 #define MyAppName "crossbean"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "crossbean contributors"
 #define MyAppExeName "crossbean.exe"
 #define DistDir "..\..\dist\crossbean-windows-x64"

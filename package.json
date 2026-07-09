@@ -1,6 +1,6 @@
 {
   "name": "crossbean",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first desktop notes with an AI-powered knowledge graph",
   "license": "MIT",
   "type": "module",

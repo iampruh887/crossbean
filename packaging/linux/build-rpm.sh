@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.1.1}"
 DIST="$(pwd)/dist/crossbean-linux-x64"
 TOP="$(pwd)/dist/rpm-top"
 
