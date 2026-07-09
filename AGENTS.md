@@ -29,6 +29,7 @@ src/server.ts            loopback JSON API + static UI host (Bun.serve)
 src/store.ts             sqlite: notes/links/embeddings + sqlite-vec KNN
 src/vault.ts             markdown mirror of notes + [[wikilink]] parsing
 src/graph.ts             graph builder (user edges + AI similarity edges)
+src/update.ts            GitHub-release version check (semver + asset picking)
 ui/index.html            single-page UI shell
 ui/app.js                editor, note list, search, IPC to engine, theming
 ui/graph.js              force-directed canvas graph (custom physics)

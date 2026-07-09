@@ -2,8 +2,9 @@
 // ever talked to by our own native WebView2 window — it is not a public website.
 // Serves the UI assets and a small JSON API over the store/vault/graph modules.
 
-import { join, extname } from "node:path";
-import { uiDir as defaultUiDir } from "./paths";
+import { join, extname, basename } from "node:path";
+import { mkdirSync } from "node:fs";
+import { uiDir as defaultUiDir, attachmentsDir } from "./paths";
 import {
   initStore,
   isVecEnabled,
@@ -18,6 +19,7 @@ import {
 } from "./store";
 import { initVault, writeNoteFile, deleteNoteFile, parseWikilinks } from "./vault";
 import { buildGraph, suggestFor } from "./graph";
+import { APP_VERSION, REPO, checkForUpdate } from "./update";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -25,7 +27,22 @@ const MIME: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
 };
+
+// Accepted image upload types -> file extension used on disk.
+const EXT_FOR_MIME: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+};
+const MAX_UPLOAD = 15 * 1024 * 1024; // 15 MB
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -45,7 +62,8 @@ export function startServer(uiDir = defaultUiDir) {
   console.log(`[store] vector backend: ${vecEnabled ? "sqlite-vec (native)" : "JS cosine fallback"}`);
 
   const server = Bun.serve({
-    port: 0,
+    // Ephemeral port by default; PORT env overrides it for headless preview/tests.
+    port: Number(process.env.PORT ?? 0),
     hostname: "127.0.0.1",
     idleTimeout: 240,
     async fetch(req) {
@@ -58,13 +76,23 @@ export function startServer(uiDir = defaultUiDir) {
           return json({ ok: true, vec: isVecEnabled() });
         }
 
+        if (path === "/api/version" && req.method === "GET") {
+          return json({ version: APP_VERSION, repo: REPO });
+        }
+
+        // check GitHub Releases for a newer version (done here, not in the
+        // renderer, to avoid CORS and keep a single User-Agent).
+        if (path === "/api/update-check" && req.method === "GET") {
+          return json(await checkForUpdate());
+        }
+
         if (path === "/api/notes" && req.method === "GET") {
           return json(listNotes());
         }
 
         if (path === "/api/notes" && req.method === "POST") {
           const b = (await req.json()) as any;
-          const id = createNote(b.title ?? "Untitled", b.body ?? "");
+          const id = createNote(b.title ?? "Untitled", b.body ?? "", b.grp);
           await syncDerived(id, b.title ?? "Untitled", b.body ?? "");
           return json({ id });
         }
@@ -78,7 +106,7 @@ export function startServer(uiDir = defaultUiDir) {
           }
           if (req.method === "PUT") {
             const b = (await req.json()) as any;
-            updateNote(id, b.title ?? "Untitled", b.body ?? "");
+            updateNote(id, b.title ?? "Untitled", b.body ?? "", b.grp);
             await syncDerived(id, b.title ?? "Untitled", b.body ?? "");
             return json({ ok: true });
           }
@@ -87,6 +115,36 @@ export function startServer(uiDir = defaultUiDir) {
             deleteNoteFile(id);
             return json({ ok: true });
           }
+        }
+
+        // image upload: raw image bytes in the body, content-type sets the kind.
+        // Saved under the data dir and served back on /files/.
+        if (path === "/api/upload" && req.method === "POST") {
+          const ct = (req.headers.get("content-type") ?? "").split(";")[0].trim();
+          const ext = EXT_FOR_MIME[ct];
+          if (!ext) return json({ error: `unsupported image type: ${ct || "none"}` }, 415);
+          const buf = new Uint8Array(await req.arrayBuffer());
+          if (buf.byteLength === 0) return json({ error: "empty upload" }, 400);
+          if (buf.byteLength > MAX_UPLOAD) return json({ error: "image too large (max 15 MB)" }, 413);
+          mkdirSync(attachmentsDir, { recursive: true });
+          const name = `${crypto.randomUUID()}.${ext}`;
+          await Bun.write(join(attachmentsDir, name), buf);
+          return json({ url: `/files/${name}` });
+        }
+
+        // serve a previously uploaded image
+        if (path.startsWith("/files/")) {
+          const name = basename(decodeURIComponent(path.slice("/files/".length)));
+          if (!name || name.includes("..") || name.includes("/")) {
+            return new Response("bad path", { status: 400 });
+          }
+          const f = Bun.file(join(attachmentsDir, name));
+          if (await f.exists()) {
+            return new Response(f, {
+              headers: { "content-type": MIME[extname(name)] ?? "application/octet-stream" },
+            });
+          }
+          return new Response("not found", { status: 404 });
         }
 
         // store an embedding computed in the renderer

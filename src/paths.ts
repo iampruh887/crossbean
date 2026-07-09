@@ -38,6 +38,9 @@ mkdirSync(dataDir, { recursive: true });
 
 export const dbPath = join(dataDir, "crossbean.db");
 export const vaultDir = join(dataDir, "vault");
+// User-attached images (pasted / dropped / uploaded in the editor), served on
+// the /files/ route. Kept out of the vault/ markdown mirror on purpose.
+export const attachmentsDir = join(dataDir, "attachments");
 
 // A native library shipped next to the executable, or null if absent
 // (dev mode falls back to the npm package's copy).

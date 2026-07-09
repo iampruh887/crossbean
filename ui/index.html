@@ -28,6 +28,11 @@
         </div>
 
         <div id="noteList" class="note-list"></div>
+
+        <div class="side-footer">
+          <span id="appVersion" class="app-version"></span>
+          <button id="checkUpdateBtn" class="link-btn" title="Check GitHub for a newer version">Check for updates</button>
+        </div>
       </aside>
 
       <!-- Main -->
@@ -43,6 +48,15 @@
         <!-- Editor view -->
         <section id="editorView" class="view active">
           <input id="titleInput" class="title-input" placeholder="Untitled" />
+          <div class="editor-bar">
+            <label class="grp-picker" title="Group this note">
+              <span class="bar-icon">🗂</span>
+              <select id="groupSelect"></select>
+            </label>
+            <div class="bar-spacer"></div>
+            <button id="attachImgBtn" class="btn bar-btn" title="Attach an image (or paste / drop one)">🖼 Image</button>
+            <input id="imgFileInput" type="file" accept="image/*" multiple hidden />
+          </div>
           <div class="editor-wrap">
             <textarea
               id="bodyInput"
@@ -72,6 +86,35 @@
           <div id="graphEmpty" class="graph-empty">No notes yet. Create a few and connections appear here.</div>
         </section>
       </main>
+    </div>
+
+    <!-- Update-available prompt -->
+    <div id="updateModal" class="modal-backdrop" hidden>
+      <div class="modal-card">
+        <button class="modal-close" id="updateClose" title="Close">✕</button>
+        <div class="modal-emoji">🎉</div>
+        <h2>Update available</h2>
+        <p id="updateText"></p>
+        <pre id="updateNotes" class="update-notes"></pre>
+        <div class="modal-actions">
+          <button id="updateDownload" class="btn primary">Download</button>
+          <button id="updateView" class="btn">Release notes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Star-the-repo prompt (shown once, a couple days in) -->
+    <div id="starModal" class="modal-backdrop" hidden>
+      <div class="modal-card">
+        <button class="modal-close" id="starClose" title="Close">✕</button>
+        <div class="modal-emoji">⭐</div>
+        <h2>Enjoying crossbean?</h2>
+        <p>crossbean is free and open source. A star on GitHub helps other people find it — and it means a lot.</p>
+        <div class="modal-actions">
+          <button id="starGo" class="btn primary">⭐ Star on GitHub</button>
+          <button id="starLater" class="btn">Maybe later</button>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="/app.js"></script>
