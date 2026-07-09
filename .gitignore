@@ -1,0 +1,8 @@
+node_modules/
+dist/
+vault/
+crossbean.db
+crossbean.db-wal
+crossbean.db-shm
+*-out.txt
+packaging/windows/icon.ico

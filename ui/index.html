@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>crossbean</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Sidebar -->
+      <aside id="sidebar">
+        <div class="brand">
+          <span class="logo">🫘</span>
+          <div>
+            <div class="brand-name">crossbean</div>
+            <div class="brand-sub" id="vecBadge">connecting…</div>
+          </div>
+        </div>
+
+        <div class="side-actions">
+          <button id="newNoteBtn" class="btn primary">+ New note</button>
+        </div>
+
+        <div class="search-box">
+          <input id="searchInput" type="text" placeholder="Semantic search…" />
+          <button id="searchBtn" class="btn" title="Search by meaning">⌕</button>
+        </div>
+
+        <div id="noteList" class="note-list"></div>
+      </aside>
+
+      <!-- Main -->
+      <main id="main">
+        <div class="tabs">
+          <button class="tab active" data-view="editor">Editor</button>
+          <button class="tab" data-view="graph">Graph</button>
+          <div class="tab-spacer"></div>
+          <span id="status" class="status"></span>
+          <button id="themeBtn" class="btn theme-btn" title="Switch theme"></button>
+        </div>
+
+        <!-- Editor view -->
+        <section id="editorView" class="view active">
+          <input id="titleInput" class="title-input" placeholder="Untitled" />
+          <div class="editor-wrap">
+            <textarea
+              id="bodyInput"
+              class="body-input"
+              placeholder="Write in markdown. Link notes with [[Note Title]].&#10;&#10;Connections are found automatically from meaning — open the Graph tab."
+              spellcheck="false"
+            ></textarea>
+            <div id="preview" class="preview"></div>
+          </div>
+          <div class="editor-footer">
+            <div id="suggestions" class="suggestions"></div>
+          </div>
+        </section>
+
+        <!-- Graph view -->
+        <section id="graphView" class="view">
+          <div class="graph-toolbar">
+            <label>
+              AI similarity ≥ <b id="thVal">0.30</b>
+              <input id="threshold" type="range" min="0.15" max="0.6" step="0.01" value="0.30" />
+            </label>
+            <span class="legend"><i class="dot user"></i> your links</span>
+            <span class="legend"><i class="dot ai"></i> AI connections</span>
+            <button id="refreshGraph" class="btn">Recompute</button>
+          </div>
+          <canvas id="graphCanvas"></canvas>
+          <div id="graphEmpty" class="graph-empty">No notes yet. Create a few and connections appear here.</div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

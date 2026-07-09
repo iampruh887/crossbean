@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="56" fill="#faf8f2"/>
+  <rect width="256" height="256" rx="56" fill="none" stroke="#1a1812" stroke-width="8"/>
+  <!-- knowledge-graph bean: nodes + edges -->
+  <g stroke="#1a1812" stroke-width="7" stroke-linecap="round">
+    <line x1="78" y1="96" x2="128" y2="150"/>
+    <line x1="128" y1="150" x2="186" y2="106"/>
+  </g>
+  <g stroke="#a06b2e" stroke-width="6" stroke-linecap="round" stroke-dasharray="2 12">
+    <line x1="78" y1="96" x2="186" y2="106"/>
+    <line x1="128" y1="150" x2="150" y2="200"/>
+  </g>
+  <circle cx="78" cy="96" r="26" fill="#1a1812"/>
+  <circle cx="186" cy="106" r="20" fill="#1a1812"/>
+  <circle cx="128" cy="150" r="16" fill="#a06b2e"/>
+  <circle cx="150" cy="200" r="11" fill="#1a1812"/>
+</svg>
