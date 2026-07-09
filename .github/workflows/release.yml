@@ -55,12 +55,7 @@ jobs:
             dist/crossbean-linux-x64.tar.gz
 
   macos:
-    strategy:
-      matrix:
-        include:
-          - runner: macos-14 # arm64
-          - runner: macos-13 # x64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14 # arm64 (Apple Silicon)
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -69,7 +64,7 @@ jobs:
       - run: bash packaging/macos/build-app.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.runner }}
+          name: macos
           path: dist/*.dmg
 
   publish:
