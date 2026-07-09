@@ -24,6 +24,7 @@ export interface NoteMeta {
   updated: number;
   snippet: string;
   hasVec: boolean;
+  grp: string | null; // folder/group name, null = ungrouped
 }
 export interface Note extends NoteMeta {
   body: string;
@@ -55,6 +56,13 @@ export function initStore(path = dbPath): { vecEnabled: boolean } {
       data    BLOB NOT NULL
     );
   `);
+
+  // Migration: notes.grp holds the (implicit) group/folder name. Guarded so it
+  // runs at most once on an existing db and is a no-op on a fresh one.
+  const cols = db.query("PRAGMA table_info(notes)").all() as any[];
+  if (!cols.some((c) => c.name === "grp")) {
+    db.exec("ALTER TABLE notes ADD COLUMN grp TEXT");
+  }
 
   try {
     loadVec(db);
@@ -88,10 +96,16 @@ export function isVecEnabled() {
 const snippetOf = (body: string) =>
   body.replace(/[#*_`>\-\[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
 
+// Normalize a group name: trimmed non-empty string, or null for ungrouped.
+const normGrp = (g: unknown): string | null => {
+  const s = typeof g === "string" ? g.trim() : "";
+  return s ? s : null;
+};
+
 export function listNotes(): NoteMeta[] {
   const rows = db
     .query(
-      `SELECT n.id, n.title, n.body, n.updated,
+      `SELECT n.id, n.title, n.body, n.updated, n.grp,
               (SELECT 1 FROM embeddings e WHERE e.note_id = n.id) AS hv
        FROM notes n ORDER BY n.updated DESC`
     )
@@ -102,29 +116,31 @@ export function listNotes(): NoteMeta[] {
     updated: r.updated,
     snippet: snippetOf(r.body),
     hasVec: !!r.hv,
+    grp: r.grp ?? null,
   }));
 }
 
 export function getNote(id: number): Note | null {
-  const r = db.query("SELECT id, title, body, updated FROM notes WHERE id = ?").get(id) as any;
+  const r = db.query("SELECT id, title, body, updated, grp FROM notes WHERE id = ?").get(id) as any;
   if (!r) return null;
   const hv = db.query("SELECT 1 FROM embeddings WHERE note_id = ?").get(id);
-  return { id: r.id, title: r.title, body: r.body, updated: r.updated, snippet: snippetOf(r.body), hasVec: !!hv };
+  return { id: r.id, title: r.title, body: r.body, updated: r.updated, snippet: snippetOf(r.body), hasVec: !!hv, grp: r.grp ?? null };
 }
 
-export function createNote(title: string, body: string): number {
+export function createNote(title: string, body: string, grp?: unknown): number {
   const now = Date.now();
   const info = db
-    .query("INSERT INTO notes(title, body, updated) VALUES (?, ?, ?)")
-    .run(title || "Untitled", body || "", now);
+    .query("INSERT INTO notes(title, body, updated, grp) VALUES (?, ?, ?, ?)")
+    .run(title || "Untitled", body || "", now, normGrp(grp));
   return Number(info.lastInsertRowid);
 }
 
-export function updateNote(id: number, title: string, body: string): void {
-  db.query("UPDATE notes SET title = ?, body = ?, updated = ? WHERE id = ?").run(
+export function updateNote(id: number, title: string, body: string, grp?: unknown): void {
+  db.query("UPDATE notes SET title = ?, body = ?, updated = ?, grp = ? WHERE id = ?").run(
     title || "Untitled",
     body || "",
     Date.now(),
+    normGrp(grp),
     id
   );
 }

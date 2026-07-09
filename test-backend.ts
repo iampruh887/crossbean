@@ -94,6 +94,69 @@ const { readdirSync } = await import("node:fs");
 const files = readdirSync(join(scratch, "vault"));
 ok(files.length >= 3, `vault mirrored ${files.length} md files`);
 
+// --- grouping (folders) ---------------------------------------------------
+const gA = await post("/api/notes", { title: "Grouped", body: "x", grp: "Work" });
+const listG = await get("/api/notes");
+ok(listG.find((n: any) => n.id === gA.id)?.grp === "Work", "note created with group");
+await put(`/api/notes/${gA.id}`, { title: "Grouped", body: "x", grp: "Personal" });
+ok((await get(`/api/notes/${gA.id}`)).grp === "Personal", "group updated on note");
+await put(`/api/notes/${gA.id}`, { title: "Grouped", body: "x", grp: "  " });
+ok((await get(`/api/notes/${gA.id}`)).grp === null, "blank group clears to null (ungrouped)");
+
+// --- delete ---------------------------------------------------------------
+const del = await post("/api/notes", { title: "Temp", body: "bye" });
+await fetch(`${base}/api/notes/${del.id}`, { method: "DELETE" });
+ok(!(await get("/api/notes")).some((n: any) => n.id === del.id), "deleted note removed from list");
+
+// --- image upload + serve -------------------------------------------------
+const up = await fetch(base + "/api/upload", {
+  method: "POST",
+  headers: { "content-type": "image/png" },
+  body: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+}).then(j);
+ok(typeof up.url === "string" && up.url.startsWith("/files/"), "upload returns a /files/ url");
+const served = await fetch(base + up.url);
+ok(
+  served.status === 200 && (served.headers.get("content-type") || "").startsWith("image/png"),
+  "uploaded image is served back with image mime"
+);
+const badUp = await fetch(base + "/api/upload", {
+  method: "POST",
+  headers: { "content-type": "text/plain" },
+  body: "not an image",
+});
+ok(badUp.status === 415, "non-image upload rejected (415)");
+const traversal = await fetch(base + "/files/..%2F..%2Fcrossbean.db");
+ok(traversal.status === 400 || traversal.status === 404, "path traversal on /files/ blocked");
+
+// --- migration idempotency ------------------------------------------------
+const { initStore } = await import("./src/store");
+let migOk = true;
+try { initStore(); } catch { migOk = false; }
+ok(migOk, "re-running initStore (grp migration) is idempotent");
+
+// --- self-update ----------------------------------------------------------
+const { isNewer, pickAsset, APP_VERSION } = await import("./src/update");
+ok(isNewer("v0.2.0", "0.1.0") === true, "isNewer: v0.2.0 > 0.1.0");
+ok(isNewer("0.1.0", "0.1.0") === false, "isNewer: equal is not newer");
+ok(isNewer("0.1.9", "0.1.10") === false, "isNewer: 0.1.9 < 0.1.10 (numeric, not lexical)");
+ok(isNewer("1.0.0", "0.9.9") === true, "isNewer: major bump wins");
+const assets = [
+  { name: "crossbean-setup-windows-x64.exe", browser_download_url: "http://x/win.exe" },
+  { name: "crossbean-macos-arm64.dmg", browser_download_url: "http://x/mac-arm.dmg" },
+  { name: "crossbean_0.2.0_amd64.deb", browser_download_url: "http://x/app.deb" },
+];
+ok(pickAsset(assets, "win32", "x64") === "http://x/win.exe", "pickAsset: windows -> setup exe");
+ok(pickAsset(assets, "darwin", "arm64") === "http://x/mac-arm.dmg", "pickAsset: mac arm -> arm64 dmg");
+ok(pickAsset(assets, "linux", "x64") === null, "pickAsset: linux -> null (release page fallback)");
+
+const ver = await get("/api/version");
+ok(ver.version === APP_VERSION && typeof ver.repo === "string", "/api/version returns current version + repo");
+
+const upd = await get("/api/update-check");
+ok(ver.version === upd.current && typeof upd.updateAvailable === "boolean",
+  "/api/update-check returns a stable shape (current + boolean, even offline)");
+
 srv.stop(true);
 // best-effort cleanup — on Windows the sqlite handle may still hold a lock,
 // and the OS temp dir gets purged anyway
