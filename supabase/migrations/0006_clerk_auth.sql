@@ -5,7 +5,10 @@
 -- Clerk as a provider under Supabase → Authentication → Sign In / Providers.
 --
 -- Safe to run on a fresh project right after 0001–0005. Destructive to any
--- existing users/vaults (there shouldn't be any yet).
+-- existing users/vaults (there shouldn't be any yet). Wrapped in a transaction
+-- so a mid-way error rolls back cleanly instead of leaving a half-migrated db.
+
+begin;
 
 -- The caller's Clerk user id.
 create or replace function public.clerk_uid() returns text
@@ -22,11 +25,11 @@ truncate public.vault_members, public.notes, public.links, public.note_embedding
 delete from public.vaults;
 
 -- user_id/owner_id become Clerk text ids (and stop referencing auth.users).
-alter table public.vaults drop constraint vaults_owner_id_fkey;
+alter table public.vaults drop constraint if exists vaults_owner_id_fkey;
 alter table public.vaults alter column owner_id type text using owner_id::text;
 
 drop policy if exists members_delete on public.vault_members;
-alter table public.vault_members drop constraint vault_members_user_id_fkey;
+alter table public.vault_members drop constraint if exists vault_members_user_id_fkey;
 alter table public.vault_members alter column user_id type text using user_id::text;
 
 -- Emails for invite-by-email live here now (auth.users is out of the picture).
@@ -92,7 +95,7 @@ begin
 end $$;
 
 -- return type changes (user_id uuid → text), so replace isn't allowed
-drop function public.list_vault_members(uuid);
+drop function if exists public.list_vault_members(uuid);
 create function public.list_vault_members(p_vault uuid)
 returns table (user_id text, email text, role text)
 language plpgsql security definer set search_path = '' as $$
@@ -107,3 +110,5 @@ begin
     where m.vault_id = p_vault
     order by m.added_at;
 end $$;
+
+commit;

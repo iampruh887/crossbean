@@ -62,6 +62,24 @@ function setStatus(msg, busy = false) {
   statusEl.classList.toggle("busy", busy);
 }
 
+// Surface a fatal boot/setup failure instead of hanging silently on "connecting…".
+function fatalError(err) {
+  console.error("[crossbean] boot failed:", err);
+  const msg = (err && err.message) || String(err);
+  const badge = $("#vecBadge");
+  if (badge) badge.textContent = "error";
+  let banner = document.getElementById("bootError");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "bootError";
+    banner.className = "boot-error";
+    document.body.appendChild(banner);
+  }
+  banner.innerHTML = `<b>Couldn't reach the backend.</b> <span class="be-msg"></span><button class="be-x" title="dismiss">✕</button>`;
+  banner.querySelector(".be-msg").textContent = msg;
+  banner.querySelector(".be-x").onclick = () => banner.remove();
+}
+
 // --------------------------------------------------------------- note list UI
 async function refreshNotes(selectId) {
   state.notes = await api.notes();
@@ -608,4 +626,4 @@ Try it: make a couple of notes on related topics and watch them connect — even
 
 Everything lives on your machine. Notes are mirrored to the \`vault/\` folder as plain markdown.`;
 
-boot();
+boot().catch(fatalError);

@@ -262,6 +262,18 @@ body {
 #graphCanvas:active { cursor: grabbing; }
 .graph-empty { position: absolute; inset: 0; display: none; place-items: center; color: var(--text-dim); }
 
+/* Fatal boot/setup error banner */
+.boot-error {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; background: var(--danger); color: #fff;
+  font-size: 13px; font-family: var(--font-chrome);
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+.boot-error .be-msg { flex: 1; min-width: 0; opacity: .95; font-family: var(--font-mono); font-size: 12px; }
+.boot-error .be-x { background: none; border: none; color: #fff; cursor: pointer; font-size: 14px; opacity: .8; }
+.boot-error .be-x:hover { opacity: 1; }
+
 /* Platform gating: /config.js sets body[data-platform] */
 body[data-platform="desktop"] .web-only { display: none !important; }
 body[data-platform="web"] .desktop-only { display: none !important; }
