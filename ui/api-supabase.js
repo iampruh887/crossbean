@@ -227,7 +227,12 @@ export async function createApi(config) {
         r.onerror = () => rej(new Error("could not read image"));
         r.readAsDataURL(file);
       });
-      const { data, error } = await sb.functions.invoke("ocr", { body: { image } });
+      // attach the Clerk session token explicitly so the function's JWKS check passes
+      const token = await clerk.session?.getToken();
+      const { data, error } = await sb.functions.invoke("ocr", {
+        body: { image },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (error) throw new Error(error.message || "OCR request failed");
       if (data?.error) throw new Error(data.error);
       return data?.text ?? "";
