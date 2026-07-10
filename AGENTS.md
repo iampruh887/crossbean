@@ -30,11 +30,16 @@ src/store.ts             sqlite: notes/links/embeddings + sqlite-vec KNN
 src/vault.ts             markdown mirror of notes + [[wikilink]] parsing
 src/graph.ts             graph builder (user edges + AI similarity edges)
 src/update.ts            GitHub-release version check (semver + asset picking)
-ui/index.html            single-page UI shell
-ui/app.js                editor, note list, search, IPC to engine, theming
+ui/index.html            single-page UI shell (shared by desktop AND web)
+ui/app.js                editor, note list, search, auth/vaults (web), theming
+ui/api-local.js          desktop API adapter → loopback HTTP engine
+ui/api-supabase.js       web API adapter → Clerk (identity) + supabase-js (data)
 ui/graph.js              force-directed canvas graph (custom physics)
 ui/embed-worker.js       Transformers.js all-MiniLM-L6-v2 in a Web Worker
 ui/styles.css            two themes: "paper" (default) and "terminal"
+web/server.ts            web: thin static host for ui/ + /config.js from env
+supabase/migrations/     web backend: schema, RLS, RPCs, storage (run in order)
+supabase/functions/ocr/  edge function: image → hosted vision model → text (OCR)
 scripts/build-release.ts compile binary + assemble dist folder
 packaging/               Inno Setup (.iss), deb/rpm scripts, macOS .app/dmg
 test-backend.ts          headless end-to-end API tests
@@ -67,6 +72,19 @@ test-backend.ts          headless end-to-end API tests
 6. **webview-bun reads `WEBVIEW_PATH` at import time** — `main.ts` sets it
    before a *dynamic* `import("webview-bun")`. A static import would hoist
    above the assignment and load the wrong library in installed mode.
+
+7. **The desktop engine binds a STABLE port (47821, fallback ephemeral).**
+   The renderer's cached embedding model lives in origin-scoped browser
+   storage; a random port per launch changes the origin and re-downloads
+   ~30 MB every run. Don't switch back to `port: 0`.
+
+8. **The UI is platform-agnostic; adapters own all I/O.** `/config.js`
+   (served by each server) picks `ui/api-local.js` (desktop) or
+   `ui/api-supabase.js` (web). Never call `fetch("/api/...")`, supabase-js,
+   or Clerk directly from `app.js`/`graph.js` — add it to both adapters
+   instead. Web identity is Clerk (JWTs via supabase-js `accessToken`);
+   web authorization lives in Postgres RLS keyed on the Clerk user id
+   (`supabase/migrations/0002` + `0006`), never in client JS.
 
 ## Conventions
 

@@ -6,3 +6,6 @@ crossbean.db-wal
 crossbean.db-shm
 *-out.txt
 packaging/windows/icon.ico
+.env
+ui/config.js
+.vercel

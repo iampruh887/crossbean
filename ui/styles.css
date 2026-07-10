@@ -262,6 +262,72 @@ body {
 #graphCanvas:active { cursor: grabbing; }
 .graph-empty { position: absolute; inset: 0; display: none; place-items: center; color: var(--text-dim); }
 
+/* Fatal boot/setup error banner */
+.boot-error {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; background: var(--danger); color: #fff;
+  font-size: 13px; font-family: var(--font-chrome);
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+.boot-error .be-msg { flex: 1; min-width: 0; opacity: .95; font-family: var(--font-mono); font-size: 12px; }
+.boot-error .be-x { background: none; border: none; color: #fff; cursor: pointer; font-size: 14px; opacity: .8; }
+.boot-error .be-x:hover { opacity: 1; }
+
+.hidden { display: none !important; }
+
+/* Platform gating: /config.js sets body[data-platform] */
+body[data-platform="desktop"] .web-only { display: none !important; }
+body[data-platform="web"] .desktop-only { display: none !important; }
+
+/* Vault switcher (web) */
+.vault-row { display: flex; gap: 6px; padding: 0 16px 10px; }
+.vault-row select {
+  flex: 1; background: transparent; border: 1px solid var(--border-strong);
+  border-radius: var(--radius); color: var(--text); padding: 6px 8px; font-size: 12.5px;
+  font-family: var(--font-chrome); cursor: pointer; min-width: 0;
+}
+.vault-row select:focus { outline: none; border-color: var(--accent); }
+.icon-btn { padding: 5px 9px; font-size: 13px; flex: none; }
+
+/* Auth screen (web) — Clerk's sign-in component mounts inside .auth-wrap
+   and brings its own card styling; we only provide the backdrop + brand. */
+.auth-screen {
+  position: fixed; inset: 0; z-index: 200; background: var(--bg);
+  display: grid; place-items: center; overflow-y: auto;
+}
+.auth-screen[hidden] { display: none; }
+.auth-wrap { text-align: center; padding: 24px 0; }
+.auth-brand { justify-content: center; padding: 0 0 2px; }
+.auth-sub { color: var(--text-dim); font-size: 13px; margin: 4px 0 22px; font-family: var(--font-content); }
+#clerkAuth { display: flex; justify-content: center; }
+.auth-error { color: var(--danger); font-size: 12.5px; min-height: 16px; }
+
+/* Share dialog (web) */
+.share-card { text-align: left; max-width: 420px; width: calc(100vw - 40px); }
+.share-card h2 { text-align: center; }
+.share-sub { font-size: 12.5px !important; }
+.member-list { margin: 0 0 14px; display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.member-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  background: var(--panel); border-radius: var(--radius); font-size: 13px;
+}
+.member-email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-role { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; flex: none; }
+.member-remove { opacity: .7; }
+.member-remove:hover { color: var(--danger); opacity: 1; }
+.invite-row { display: flex; gap: 8px; }
+.invite-row input {
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); color: var(--text); padding: 7px 10px; font-size: 13px;
+  font-family: var(--font-chrome);
+}
+.invite-row input:focus { outline: none; border-color: var(--accent); }
+.invite-row select {
+  background: transparent; border: 1px solid var(--border-strong); border-radius: var(--radius);
+  color: var(--text); padding: 7px 8px; font-size: 12.5px; font-family: var(--font-chrome); cursor: pointer;
+}
+
 /* Modal (star-the-repo prompt) */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100;

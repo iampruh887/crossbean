@@ -50,6 +50,10 @@ const json = (data: unknown, status = 200) =>
     headers: { "content-type": "application/json; charset=utf-8" },
   });
 
+// Default loopback port. Stable across launches so the webview origin — and
+// with it the renderer's cached embedding model — survives restarts.
+const DEFAULT_PORT = 47821;
+
 // keep the on-disk markdown + user links in sync after a body change
 async function syncDerived(id: number, title: string, body: string) {
   setUserLinks(id, parseWikilinks(body));
@@ -61,17 +65,23 @@ export function startServer(uiDir = defaultUiDir) {
   initVault();
   console.log(`[store] vector backend: ${vecEnabled ? "sqlite-vec (native)" : "JS cosine fallback"}`);
 
-  const server = Bun.serve({
-    // Ephemeral port by default; PORT env overrides it for headless preview/tests.
-    port: Number(process.env.PORT ?? 0),
+  const options = {
     hostname: "127.0.0.1",
     idleTimeout: 240,
-    async fetch(req) {
+    async fetch(req: Request) {
       const url = new URL(req.url);
       const path = url.pathname;
 
       try {
         // ---- API ----
+        // Platform config consumed by the shared UI before app.js loads.
+        // The web deployment (web/server.ts) serves its own with supabase creds.
+        if (path === "/config.js") {
+          return new Response(`window.CB_CONFIG = { platform: "desktop" };`, {
+            headers: { "content-type": "text/javascript; charset=utf-8" },
+          });
+        }
+
         if (path === "/api/health") {
           return json({ ok: true, vec: isVecEnabled() });
         }
@@ -192,7 +202,21 @@ export function startServer(uiDir = defaultUiDir) {
         return json({ error: (e as Error).message }, 500);
       }
     },
-  });
+  };
+
+  // Bind a STABLE port. The renderer's model/browser cache is keyed by origin
+  // (scheme://host:port), so a random port per launch would orphan the ~30 MB
+  // embedding model cache and re-download it every run. PORT env overrides;
+  // if the port is taken (e.g. a second instance) fall back to ephemeral —
+  // everything still works, that session just doesn't share the cache.
+  const preferred = Number(process.env.PORT ?? DEFAULT_PORT);
+  let server;
+  try {
+    server = Bun.serve({ ...options, port: preferred });
+  } catch {
+    console.error(`[server] port ${preferred} busy, falling back to an ephemeral port`);
+    server = Bun.serve({ ...options, port: 0 });
+  }
 
   return server;
 }

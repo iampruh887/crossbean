@@ -43,9 +43,14 @@ export function resizeGraph() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// Where graph data comes from — injected by app.js so the same renderer works
+// against the local engine (desktop) and Supabase RPCs (web).
+let graphSource = async (threshold) => (await fetch(`/api/graph?threshold=${threshold}`)).json();
+export function setGraphSource(fn) { graphSource = fn; }
+
 export async function loadGraph(threshold, openHandler) {
   onOpen = openHandler;
-  const data = await (await fetch(`/api/graph?threshold=${threshold}`)).json();
+  const data = await graphSource(threshold);
   const prev = nodeById;
   nodeById = new Map();
   const rect = canvas.getBoundingClientRect();
@@ -128,7 +133,7 @@ function draw() {
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.strokeStyle = e.type === "user" ? C.user : C.ai;
-    ctx.globalAlpha = e.type === "user" ? 0.6 : 0.3 + Math.min(0.5, (e.weight - 0.25));
+    ctx.globalAlpha = e.type === "user" ? 0.6 : 0.3 + Math.min(0.5, ((e.weight ?? 0.3) - 0.25));
     ctx.lineWidth = (e.type === "user" ? 1.6 : 1.0) / view.k;
     ctx.stroke();
   }
@@ -136,7 +141,7 @@ function draw() {
 
   // nodes
   for (const n of nodes) {
-    const r = 4 + Math.sqrt(n.degree) * 2.4;
+    const r = 4 + Math.sqrt(n.degree || 0) * 2.4; // guard: missing degree must never yield NaN (invisible node)
     ctx.beginPath();
     ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     ctx.fillStyle = n.hasVec ? C.node : C.nodeNoVec;
