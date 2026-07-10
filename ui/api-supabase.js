@@ -193,7 +193,22 @@ export async function createApi(config) {
       return hits.map((h) => ({ ...byId.get(h.id), sim: h.sim })).filter((r) => r.id != null);
     },
     async graph(threshold) {
-      return need(await sb.rpc("vault_graph", { p_vault: vaultId, p_threshold: threshold, p_neighbors: 6 }));
+      const g = need(await sb.rpc("vault_graph", { p_vault: vaultId, p_threshold: threshold, p_neighbors: 6 }));
+      // The RPC returns {id,title} nodes and {source,target,type,sim} edges.
+      // graph.js expects the desktop shape: node.degree/hasVec + edge.weight.
+      const edges = (g.edges || []).map((e) => ({
+        source: e.source, target: e.target, type: e.type,
+        weight: e.type === "user" ? 1 : (e.sim ?? 0.3),
+      }));
+      const deg = new Map();
+      for (const e of edges) {
+        deg.set(e.source, (deg.get(e.source) || 0) + 1);
+        deg.set(e.target, (deg.get(e.target) || 0) + 1);
+      }
+      const nodes = (g.nodes || []).map((n) => ({
+        id: n.id, title: n.title, degree: deg.get(n.id) || 0, hasVec: true,
+      }));
+      return { nodes, edges };
     },
 
     // ---- misc ----
