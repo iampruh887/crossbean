@@ -1,21 +1,25 @@
-// crossbean web: a thin static host for the shared UI, configured for the
-// Supabase backend. There is NO application server — auth, data, vectors and
-// storage all live in Supabase, secured by RLS (see supabase/migrations/).
+// crossbean web: a thin static host for the shared UI. There is NO application
+// server — Clerk handles identity, and data/vectors/storage live in Supabase,
+// secured by RLS (see supabase/migrations/). Env (auto-loaded from .env):
 //
-//   SUPABASE_URL=https://<ref>.supabase.co \
-//   SUPABASE_PUBLISHABLE_KEY=sb_publishable_... \
-//   bun run web/server.ts
+//   SUPABASE_URL=https://<ref>.supabase.co
+//   SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+//   CLERK_PUBLISHABLE_KEY=pk_test_...
+//
+//   bun run web
 
 import { join, extname } from "node:path";
 
 const UI_DIR = join(import.meta.dir, "..", "ui");
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
 const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? "";
+const CLERK_KEY = process.env.CLERK_PUBLISHABLE_KEY ?? "";
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
+if (!SUPABASE_URL || !SUPABASE_KEY || !CLERK_KEY) {
   console.error(
-    "[web] missing SUPABASE_URL and/or SUPABASE_PUBLISHABLE_KEY env vars.\n" +
-      "      Find both in your Supabase dashboard under Settings → API."
+    "[web] missing env vars. Required:\n" +
+      "      SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY  (Supabase → Settings → API)\n" +
+      "      CLERK_PUBLISHABLE_KEY                    (Clerk → API Keys, pk_...)"
   );
   process.exit(1);
 }
@@ -30,10 +34,12 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
 };
 
+// All three values are publishable/public by design — RLS is the security boundary.
 const configJs = `window.CB_CONFIG = ${JSON.stringify({
   platform: "web",
   supabaseUrl: SUPABASE_URL,
-  supabaseKey: SUPABASE_KEY, // publishable key — safe to expose, RLS is the security boundary
+  supabaseKey: SUPABASE_KEY,
+  clerkPublishableKey: CLERK_KEY,
 })};`;
 
 const server = Bun.serve({

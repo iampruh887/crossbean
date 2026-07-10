@@ -1,6 +1,8 @@
-// Web adapter: Supabase (auth + Postgres/pgvector + storage). Multi-user with
-// shared vaults. Authorization is enforced by RLS in the database — this file
-// only shapes requests. Embeddings are still computed in the browser worker.
+// Web adapter: Clerk (identity) + Supabase (data). Clerk's prebuilt UI handles
+// sign-in/up and issues JWTs; supabase-js sends them on every request via the
+// accessToken hook, and Postgres RLS authorizes rows against the Clerk user id
+// (auth.jwt()->>'sub' — see supabase/migrations/0006_clerk_auth.sql).
+// Embeddings are still computed in the browser worker.
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
@@ -22,8 +24,40 @@ const WIKILINK_RE = /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g;
 const parseWikilinks = (body) =>
   [...(body || "").matchAll(WIKILINK_RE)].map((m) => m[1].trim()).filter(Boolean);
 
-export function createApi(config) {
-  const sb = createClient(config.supabaseUrl, config.supabaseKey);
+// Load Clerk's browser bundles from the app's own Clerk domain (encoded in the
+// publishable key) and return the ready Clerk instance.
+async function loadClerk(publishableKey) {
+  const domain = atob(publishableKey.split("_")[2]).slice(0, -1);
+  const script = (src, attrs = {}) =>
+    new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.crossOrigin = "anonymous";
+      for (const [k, v] of Object.entries(attrs)) s.setAttribute(k, v);
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  await script(`https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`);
+  await script(`https://${domain}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, {
+    "data-clerk-publishable-key": publishableKey,
+  });
+  const clerk = window.Clerk;
+  await clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+  return clerk;
+}
+
+export async function createApi(config) {
+  if (!config.clerkPublishableKey) {
+    throw new Error("missing CLERK_PUBLISHABLE_KEY — see web/README.md");
+  }
+  const clerk = await loadClerk(config.clerkPublishableKey);
+  const sb = createClient(config.supabaseUrl, config.supabaseKey, {
+    async accessToken() {
+      return (await clerk.session?.getToken()) ?? null;
+    },
+  });
   let vaultId = localStorage.getItem(VAULT_KEY) || null;
 
   const NOTE_COLS = "id,title,body,grp,updated_at,note_embeddings(note_id)";
@@ -31,6 +65,13 @@ export function createApi(config) {
   function need(res) {
     if (res.error) throw new Error(res.error.message);
     return res.data;
+  }
+
+  // Make the signed-in user discoverable for invite-by-email.
+  async function upsertProfile() {
+    const email = clerk.user?.primaryEmailAddress?.emailAddress;
+    if (!email) return;
+    await sb.from("profiles").upsert({ user_id: clerk.user.id, email });
   }
 
   // Re-derive the [[wikilink]] edge rows for one note within its vault.
@@ -56,28 +97,36 @@ export function createApi(config) {
   return {
     platform: "web",
 
-    // ---- auth ----
+    // ---- auth (Clerk) ----
     async init() {
-      const { data } = await sb.auth.getSession();
-      return { authed: !!data.session, email: data.session?.user?.email ?? null };
+      if (clerk.user) await upsertProfile();
+      return { authed: !!clerk.user, email: clerk.user?.primaryEmailAddress?.emailAddress ?? null };
     },
-    async signIn(email, password) {
-      need(await sb.auth.signInWithPassword({ email, password }));
+    // Mount Clerk's sign-in UI into el; resolves once the user is signed in.
+    mountAuth(el) {
+      clerk.mountSignIn(el);
+      return new Promise((resolve) => {
+        const off = clerk.addListener(({ user }) => {
+          if (user) {
+            off();
+            clerk.unmountSignIn(el);
+            upsertProfile().then(resolve, resolve);
+          }
+        });
+      });
     },
-    async signUp(email, password) {
-      const data = need(await sb.auth.signUp({ email, password }));
-      // Depending on project settings, signup may require email confirmation.
-      return { needsConfirm: !data.session };
-    },
-    async signOut() { await sb.auth.signOut(); },
+    async signOut() { await clerk.signOut(); },
 
     // ---- vaults ----
     async vaults() {
-      const rows = need(await sb.from("vaults").select("id,name,owner_id").order("created_at"));
-      const { data } = await sb.auth.getUser();
-      const me = data.user?.id;
+      let rows = need(await sb.from("vaults").select("id,name,owner_id").order("created_at"));
+      if (!rows.length) {
+        // first login: everyone gets a personal vault
+        await sb.rpc("create_vault", { p_name: "Personal" });
+        rows = need(await sb.from("vaults").select("id,name,owner_id").order("created_at"));
+      }
+      const me = clerk.user?.id;
       const list = rows.map((v) => ({ ...v, mine: v.owner_id === me }));
-      // ensure the remembered vault still exists; else default to the first
       if (!list.some((v) => v.id === vaultId)) vaultId = list[0]?.id ?? null;
       if (vaultId) localStorage.setItem(VAULT_KEY, vaultId);
       return list;

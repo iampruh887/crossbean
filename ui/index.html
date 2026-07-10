@@ -95,21 +95,16 @@
       </main>
     </div>
 
-    <!-- Auth screen (web only) — covers the app until there's a session -->
+    <!-- Auth screen (web only) — covers the app until there's a session.
+         Clerk's prebuilt sign-in/up UI mounts into #clerkAuth. -->
     <div id="authScreen" class="auth-screen" hidden>
-      <div class="auth-card">
+      <div class="auth-wrap">
         <div class="brand auth-brand">
           <span class="logo">🫘</span>
           <span class="brand-name">crossbean</span>
         </div>
         <p class="auth-sub">Notes that connect themselves.</p>
-        <form id="authForm">
-          <input id="authEmail" type="email" placeholder="Email" required autocomplete="email" />
-          <input id="authPassword" type="password" placeholder="Password" required minlength="6" autocomplete="current-password" />
-          <div id="authError" class="auth-error"></div>
-          <button type="submit" id="authSubmit" class="btn primary">Sign in</button>
-        </form>
-        <button id="authToggle" class="link-btn">No account? Sign up</button>
+        <div id="clerkAuth"></div>
       </div>
     </div>
 

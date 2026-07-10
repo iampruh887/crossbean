@@ -9,8 +9,7 @@ export function createApi() {
 
     // ---- auth / vaults (desktop is single-user, single-vault) ----
     async init() { return { authed: true }; },
-    async signIn() { throw new Error("not applicable on desktop"); },
-    async signUp() { throw new Error("not applicable on desktop"); },
+    mountAuth() { throw new Error("not applicable on desktop"); },
     async signOut() {},
     async vaults() { return []; },
     async setVault() {},

@@ -33,7 +33,7 @@ src/update.ts            GitHub-release version check (semver + asset picking)
 ui/index.html            single-page UI shell (shared by desktop AND web)
 ui/app.js                editor, note list, search, auth/vaults (web), theming
 ui/api-local.js          desktop API adapter → loopback HTTP engine
-ui/api-supabase.js       web API adapter → supabase-js (auth, pgvector, storage)
+ui/api-supabase.js       web API adapter → Clerk (identity) + supabase-js (data)
 ui/graph.js              force-directed canvas graph (custom physics)
 ui/embed-worker.js       Transformers.js all-MiniLM-L6-v2 in a Web Worker
 ui/styles.css            two themes: "paper" (default) and "terminal"
@@ -79,10 +79,11 @@ test-backend.ts          headless end-to-end API tests
 
 8. **The UI is platform-agnostic; adapters own all I/O.** `/config.js`
    (served by each server) picks `ui/api-local.js` (desktop) or
-   `ui/api-supabase.js` (web). Never call `fetch("/api/...")` or supabase-js
-   directly from `app.js`/`graph.js` — add it to both adapters instead.
-   Web authorization lives in Postgres RLS (`supabase/migrations/0002`),
-   never in client JS.
+   `ui/api-supabase.js` (web). Never call `fetch("/api/...")`, supabase-js,
+   or Clerk directly from `app.js`/`graph.js` — add it to both adapters
+   instead. Web identity is Clerk (JWTs via supabase-js `accessToken`);
+   web authorization lives in Postgres RLS keyed on the Clerk user id
+   (`supabase/migrations/0002` + `0006`), never in client JS.
 
 ## Conventions
 

@@ -387,51 +387,13 @@ async function checkForUpdates(manual = false) {
 }
 
 // ----------------------------------------------------------- auth (web only)
-// Shows the login screen and resolves once there's a session.
-function requireAuth() {
-  return new Promise((resolve) => {
-    const screen = $("#authScreen");
-    const form = $("#authForm");
-    const errEl = $("#authError");
-    let mode = "in"; // "in" | "up"
-
-    const setMode = (m) => {
-      mode = m;
-      $("#authSubmit").textContent = m === "in" ? "Sign in" : "Create account";
-      $("#authToggle").textContent = m === "in" ? "No account? Sign up" : "Have an account? Sign in";
-      errEl.textContent = "";
-    };
-    $("#authToggle").onclick = () => setMode(mode === "in" ? "up" : "in");
-
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      errEl.textContent = "";
-      $("#authSubmit").disabled = true;
-      try {
-        const email = $("#authEmail").value.trim();
-        const password = $("#authPassword").value;
-        if (mode === "up") {
-          const { needsConfirm } = await api.signUp(email, password);
-          if (needsConfirm) {
-            errEl.textContent = "Check your email to confirm your account, then sign in.";
-            setMode("in");
-            return;
-          }
-        } else {
-          await api.signIn(email, password);
-        }
-        screen.hidden = true;
-        resolve();
-      } catch (err) {
-        errEl.textContent = err.message;
-      } finally {
-        $("#authSubmit").disabled = false;
-      }
-    };
-
-    setMode("in");
-    screen.hidden = false;
-  });
+// Shows the login screen (Clerk's prebuilt sign-in/up UI) and resolves once
+// there's a session. Email delivery, verification, MFA etc. are all Clerk's.
+async function requireAuth() {
+  const screen = $("#authScreen");
+  screen.hidden = false;
+  await api.mountAuth($("#clerkAuth"));
+  screen.hidden = true;
 }
 
 // -------------------------------------------------------- vaults (web only)
