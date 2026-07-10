@@ -18,6 +18,12 @@
           </div>
         </div>
 
+        <!-- Vault switcher (web only; desktop is single-vault) -->
+        <div class="vault-row web-only">
+          <select id="vaultSelect" title="Switch vault"></select>
+          <button id="shareVaultBtn" class="btn icon-btn" title="Share this vault">⇗</button>
+        </div>
+
         <div class="side-actions">
           <button id="newNoteBtn" class="btn primary">+ New note</button>
         </div>
@@ -31,7 +37,8 @@
 
         <div class="side-footer">
           <span id="appVersion" class="app-version"></span>
-          <button id="checkUpdateBtn" class="link-btn" title="Check GitHub for a newer version">Check for updates</button>
+          <button id="checkUpdateBtn" class="link-btn desktop-only" title="Check GitHub for a newer version">Check for updates</button>
+          <button id="signOutBtn" class="link-btn web-only" title="Sign out of your account">Sign out</button>
         </div>
       </aside>
 
@@ -88,6 +95,43 @@
       </main>
     </div>
 
+    <!-- Auth screen (web only) — covers the app until there's a session -->
+    <div id="authScreen" class="auth-screen" hidden>
+      <div class="auth-card">
+        <div class="brand auth-brand">
+          <span class="logo">🫘</span>
+          <span class="brand-name">crossbean</span>
+        </div>
+        <p class="auth-sub">Notes that connect themselves.</p>
+        <form id="authForm">
+          <input id="authEmail" type="email" placeholder="Email" required autocomplete="email" />
+          <input id="authPassword" type="password" placeholder="Password" required minlength="6" autocomplete="current-password" />
+          <div id="authError" class="auth-error"></div>
+          <button type="submit" id="authSubmit" class="btn primary">Sign in</button>
+        </form>
+        <button id="authToggle" class="link-btn">No account? Sign up</button>
+      </div>
+    </div>
+
+    <!-- Share-vault dialog (web only) -->
+    <div id="shareModal" class="modal-backdrop" hidden>
+      <div class="modal-card share-card">
+        <button class="modal-close" id="shareClose" title="Close">✕</button>
+        <h2>Share vault</h2>
+        <p class="share-sub">Members see every note in this vault. Editors can change notes; viewers can only read.</p>
+        <div id="memberList" class="member-list"></div>
+        <form id="inviteForm" class="invite-row">
+          <input id="inviteEmail" type="email" placeholder="teammate@email.com" required />
+          <select id="inviteRole">
+            <option value="editor">editor</option>
+            <option value="viewer">viewer</option>
+          </select>
+          <button type="submit" class="btn">Invite</button>
+        </form>
+        <div id="shareError" class="auth-error"></div>
+      </div>
+    </div>
+
     <!-- Update-available prompt -->
     <div id="updateModal" class="modal-backdrop" hidden>
       <div class="modal-card">
@@ -117,6 +161,7 @@
       </div>
     </div>
 
+    <script src="/config.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

@@ -43,9 +43,14 @@ export function resizeGraph() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// Where graph data comes from — injected by app.js so the same renderer works
+// against the local engine (desktop) and Supabase RPCs (web).
+let graphSource = async (threshold) => (await fetch(`/api/graph?threshold=${threshold}`)).json();
+export function setGraphSource(fn) { graphSource = fn; }
+
 export async function loadGraph(threshold, openHandler) {
   onOpen = openHandler;
-  const data = await (await fetch(`/api/graph?threshold=${threshold}`)).json();
+  const data = await graphSource(threshold);
   const prev = nodeById;
   nodeById = new Map();
   const rect = canvas.getBoundingClientRect();

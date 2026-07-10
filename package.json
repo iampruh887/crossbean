@@ -9,7 +9,9 @@
     "dev": "bun --watch run main.ts",
     "test": "bun run test-backend.ts",
     "seed": "bun run scripts/seed.ts",
-    "build:release": "bun run scripts/build-release.ts"
+    "build:release": "bun run scripts/build-release.ts",
+    "web": "bun run web/server.ts",
+    "web:dev": "bun --watch run web/server.ts"
   },
   "dependencies": {
     "sqlite-vec": "^0.1.9",

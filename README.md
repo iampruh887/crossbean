@@ -69,11 +69,23 @@ Grab the latest from **[Releases](../../releases)**:
 | **Windows** | `crossbean-setup-windows-x64.exe` (installer) or the portable `.zip` |
 | **Debian / Ubuntu** | `crossbean_<version>_amd64.deb` → `sudo apt install ./crossbean_*.deb` |
 | **Fedora / RHEL** | `crossbean-<version>.x86_64.rpm` → `sudo dnf install ./crossbean-*.rpm` |
-| **macOS** | `crossbean-macos-arm64.dmg` (Apple Silicon) / `crossbean-macos-x64.dmg` (Intel) |
+| **macOS** | `crossbean-macos-arm64.dmg` (Apple Silicon) |
 
 Linux needs WebKitGTK (`libwebkit2gtk-4.1`) — the packages declare it as a
 dependency. Your data lives in the OS data dir (`%APPDATA%\crossbean`,
 `~/.local/share/crossbean`, `~/Library/Application Support/crossbean`).
+
+> **macOS first launch:** the app isn't code-signed (yet), so Gatekeeper will
+> warn you. **Right-click the app → Open → Open** — once, then it opens
+> normally forever. If it says *"damaged"*, run
+> `xattr -cr /Applications/crossbean.app` in Terminal and open it again.
+
+## Web version (multi-user, shared vaults)
+
+crossbean also runs in the browser with accounts and shared vaults, backed by
+your own free [Supabase](https://supabase.com) project — auth, Postgres +
+pgvector, and row-level security. Same UI, same in-browser embeddings.
+Setup guide: **[web/README.md](web/README.md)**.
 
 ## Run from source
 
@@ -96,7 +108,9 @@ bun run seed         # optional: demo notes so the graph has clusters
 | Search by meaning | sidebar search box, <kbd>Enter</kbd> |
 | Related notes | chips under the editor, ranked by similarity |
 | Switch theme | `> terminal` / `¶ paper` button, top right |
-| Delete note | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Backspace</kbd> |
+| Group notes | the 🗂 picker above the editor — folders in the sidebar |
+| Add images | paste, drag-drop, or the 🖼 button |
+| Delete note | hover a note in the sidebar → ✕ (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Backspace</kbd>) |
 
 ## Development
 

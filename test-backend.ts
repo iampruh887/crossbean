@@ -153,6 +153,18 @@ ok(pickAsset(assets, "linux", "x64") === null, "pickAsset: linux -> null (releas
 const ver = await get("/api/version");
 ok(ver.version === APP_VERSION && typeof ver.repo === "string", "/api/version returns current version + repo");
 
+// the shared UI reads /config.js before boot to pick its API adapter
+const cfg = await fetch(base + "/config.js").then((r) => r.text());
+ok(cfg.includes('platform: "desktop"'), "/config.js declares the desktop platform");
+
+// stable-port behavior: the first server holds the default port (or PORT env);
+// a second instance must fall back to a different port and still serve.
+const srv2 = startServer("ui");
+ok(srv2.port !== srv.port, `second instance falls back to another port (${srv2.port})`);
+const h2 = await fetch(`http://127.0.0.1:${srv2.port}/api/health`).then((r) => r.json());
+ok(h2.ok === true, "fallback instance still serves the API");
+srv2.stop(true);
+
 const upd = await get("/api/update-check");
 ok(ver.version === upd.current && typeof upd.updateAvailable === "boolean",
   "/api/update-check returns a stable shape (current + boolean, even offline)");
