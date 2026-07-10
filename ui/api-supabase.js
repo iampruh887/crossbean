@@ -229,11 +229,20 @@ export async function createApi(config) {
       });
       // attach the Clerk session token explicitly so the function's JWKS check passes
       const token = await clerk.session?.getToken();
+      if (!token) throw new Error("not signed in (no Clerk session token)");
       const { data, error } = await sb.functions.invoke("ocr", {
         body: { image },
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (error) throw new Error(error.message || "OCR request failed");
+      if (error) {
+        // functions.invoke hides the body behind a generic message — dig it out
+        let msg = error.message || "OCR request failed";
+        try {
+          const body = await error.context?.json?.();
+          if (body?.error) msg = body.error;
+        } catch { /* body not JSON */ }
+        throw new Error(msg);
+      }
       if (data?.error) throw new Error(data.error);
       return data?.text ?? "";
     },
