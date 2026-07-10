@@ -433,28 +433,45 @@ async function requireAuth() {
 // -------------------------------------------------------- vaults (web only)
 const NEW_VAULT = "__newv__";
 
-async function loadVaults() {
-  const list = await api.vaults();
-  const sel = $("#vaultSelect");
+// The active vault is shown in two places — the sidebar and the editor bar.
+const vaultSelectors = () => [$("#vaultSelect"), $("#editorVaultSelect")].filter(Boolean);
+
+function fillVaultSelect(sel, list, current) {
   sel.innerHTML = "";
   for (const v of list) sel.appendChild(new Option(v.name + (v.mine ? "" : " (shared)"), v.id));
   sel.appendChild(new Option("＋ New vault…", NEW_VAULT));
-  sel.value = api.currentVault() ?? list[0]?.id ?? "";
+  sel.value = current;
+}
+
+async function loadVaults() {
+  const list = await api.vaults();
   state.vaults = list;
+  const current = api.currentVault() ?? list[0]?.id ?? "";
+  for (const sel of vaultSelectors()) fillVaultSelect(sel, list, current);
 }
 
 async function switchVault(id) {
+  const current = api.currentVault() || "";
+  if (id === current) return;
+  await flushSave(); // persist pending edits while vaultId still points at the old vault
+
   if (id === NEW_VAULT) {
     const name = (prompt("New vault name:") || "").trim();
-    if (!name) { $("#vaultSelect").value = api.currentVault() || ""; return; }
+    if (!name) { for (const s of vaultSelectors()) s.value = current; return; }
     await api.createVault(name);
     await loadVaults();
   } else {
     await api.setVault(id);
+    for (const s of vaultSelectors()) s.value = id;
   }
+
   state.currentId = null; state.currentGroup = ""; state.dirty = false;
   titleEl.value = ""; bodyEl.value = ""; renderPreview(); suggestionsEl.innerHTML = "";
   await refreshNotes();
+  // if the graph is open, rebuild it for the new vault
+  if ($("#graphView").classList.contains("active")) {
+    loadGraph(Number($("#threshold").value), (nid) => { switchView("editor"); selectNote(nid); });
+  }
   indexMissing();
 }
 
@@ -568,6 +585,7 @@ function wire() {
 
   // web-only chrome
   $("#vaultSelect").onchange = (e) => switchVault(e.target.value);
+  $("#editorVaultSelect").onchange = (e) => switchVault(e.target.value);
   $("#shareVaultBtn").onclick = openShareDialog;
   $("#signOutBtn").onclick = async () => { await api.signOut(); location.reload(); };
   $("#searchInput").addEventListener("keydown", (e) => {
@@ -612,6 +630,12 @@ async function boot() {
 
   if (CONFIG.platform === "web") {
     await loadVaults();
+    // first-ever login: mint exactly one personal vault (done here, once, so
+    // it can't race into duplicates from repeated vaults() calls)
+    if (!state.vaults.length) {
+      await api.createVault("Personal");
+      await loadVaults();
+    }
     $("#vecBadge").textContent = "cloud: supabase";
   } else {
     const h = await api.health().catch(() => ({ vec: false }));

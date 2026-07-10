@@ -118,17 +118,17 @@ export async function createApi(config) {
     async signOut() { await clerk.signOut(); },
 
     // ---- vaults ----
+    // NOTE: does NOT auto-create. Personal-vault creation is done once, in
+    // boot(), so repeated vaults() calls (e.g. after switching) can never race
+    // into duplicate "Personal" vaults.
     async vaults() {
-      let rows = need(await sb.from("vaults").select("id,name,owner_id").order("created_at"));
-      if (!rows.length) {
-        // first login: everyone gets a personal vault
-        await sb.rpc("create_vault", { p_name: "Personal" });
-        rows = need(await sb.from("vaults").select("id,name,owner_id").order("created_at"));
-      }
+      const rows = need(await sb.from("vaults").select("id,name,owner_id").order("created_at"));
       const me = clerk.user?.id;
       const list = rows.map((v) => ({ ...v, mine: v.owner_id === me }));
+      // keep vaultId pointing at a vault the user actually belongs to
       if (!list.some((v) => v.id === vaultId)) vaultId = list[0]?.id ?? null;
       if (vaultId) localStorage.setItem(VAULT_KEY, vaultId);
+      else localStorage.removeItem(VAULT_KEY);
       return list;
     },
     currentVault() { return vaultId; },
@@ -151,7 +151,8 @@ export async function createApi(config) {
     // ---- notes ----
     async notes() { return vaultId ? noteMetas() : []; },
     async note(id) {
-      const r = need(await sb.from("notes").select(NOTE_COLS).eq("id", id).single());
+      // scope by vault_id too: never load a note from another of the user's vaults
+      const r = need(await sb.from("notes").select(NOTE_COLS).eq("id", id).eq("vault_id", vaultId).single());
       return { ...toMeta(r), body: r.body };
     },
     async create(title, body, grp = "") {
@@ -167,13 +168,13 @@ export async function createApi(config) {
       need(
         await sb.from("notes")
           .update({ title: title || "Untitled", body: body || "", grp: (grp || "").trim() || null })
-          .eq("id", id).select("id")
+          .eq("id", id).eq("vault_id", vaultId).select("id")
       );
       await syncLinks(id, body);
       return { ok: true };
     },
     async remove(id) {
-      need(await sb.from("notes").delete().eq("id", id).select("id"));
+      need(await sb.from("notes").delete().eq("id", id).eq("vault_id", vaultId).select("id"));
       return { ok: true };
     },
 
