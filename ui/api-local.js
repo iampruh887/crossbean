@@ -48,6 +48,8 @@ export function createApi() {
       if (!res.ok || data.error) throw new Error(data.error || `upload failed (${res.status})`);
       return data.url;
     },
+    ocrAvailable: false, // OCR runs in a cloud edge function (web only)
+    async ocr() { throw new Error("OCR is available in the web version"); },
     async health() { return (await fetch("/api/health")).json(); },
     async version() { return (await fetch("/api/version")).json(); },
     async updateCheck() { return (await fetch("/api/update-check")).json(); },

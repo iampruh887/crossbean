@@ -368,6 +368,22 @@ async function handleImageFiles(files) {
   }
 }
 
+// Scan a photo of handwriting/print → text, inserted at the cursor.
+async function runOcr(file) {
+  if (!file || !file.type.startsWith("image/") || state.currentId == null) return;
+  try {
+    setStatus("scanning text… (can take a few seconds)", true);
+    const text = (await api.ocr(file)).trim();
+    if (!text) { setStatus("no text found"); setTimeout(() => setStatus(""), 1500); return; }
+    const lead = bodyEl.value && !bodyEl.value.endsWith("\n") ? "\n\n" : "";
+    insertAtCursor(lead + text + "\n");
+    setStatus("text extracted");
+    setTimeout(() => setStatus(""), 1500);
+  } catch (e) {
+    setStatus("scan failed: " + e.message);
+  }
+}
+
 // ------------------------------------------------------------- self-update
 async function initVersion() {
   try {
@@ -527,6 +543,11 @@ function wire() {
   // image attach: toolbar button, file picker, paste, drag & drop
   $("#attachImgBtn").onclick = () => $("#imgFileInput").click();
   $("#imgFileInput").onchange = (e) => { handleImageFiles(e.target.files); e.target.value = ""; };
+
+  // OCR ("Scan text"): only shown when the adapter supports it (web)
+  $("#ocrBtn").classList.toggle("hidden", !api.ocrAvailable);
+  $("#ocrBtn").onclick = () => $("#ocrFileInput").click();
+  $("#ocrFileInput").onchange = (e) => { runOcr(e.target.files[0]); e.target.value = ""; };
   bodyEl.addEventListener("paste", (e) => {
     const files = [...(e.clipboardData?.items || [])]
       .filter((it) => it.kind === "file" && it.type.startsWith("image/"))

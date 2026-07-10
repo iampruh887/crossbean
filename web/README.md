@@ -56,6 +56,31 @@ Open http://localhost:3000 — Clerk's sign-in screen gates the app. Sign up,
 and a "Personal" vault is created for you automatically. Deploy the same
 command on any host (a $5 VPS, Fly, Railway…) behind HTTPS.
 
+## OCR ("Scan text") — optional
+
+The editor's **✍️ Scan text** button turns a photo of handwriting or print into
+note text. It runs in the `ocr` Supabase edge function, which calls a hosted
+vision model on the Hugging Face Inference router (the HF token stays
+server-side). To enable it:
+
+1. Get a free token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+   (a **read** / fine-grained token with Inference access is enough).
+2. Set the function secret and deploy (needs the [Supabase CLI](https://supabase.com/docs/guides/local-development)):
+   ```sh
+   supabase link --project-ref <your-ref>
+   supabase secrets set HF_TOKEN=hf_xxx
+   supabase functions deploy ocr --no-verify-jwt
+   ```
+   `--no-verify-jwt` is required: Clerk tokens aren't signed by the Supabase
+   project secret, so the function verifies the Clerk session itself (against
+   Clerk's JWKS) rather than at the gateway.
+3. (Optional) pick a different model:
+   `supabase secrets set OCR_MODEL=Qwen/Qwen2.5-VL-72B-Instruct`
+   (default is `Qwen/Qwen3-VL-30B-A3B-Instruct`).
+
+If the token/function aren't set up, the button just reports the error — the
+rest of the app is unaffected. OCR is web-only (the desktop app has no token).
+
 ## Notes & trade-offs
 
 - **Embeddings still run in the browser** (Transformers.js worker) — the model

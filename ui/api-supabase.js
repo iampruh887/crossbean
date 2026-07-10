@@ -203,6 +203,22 @@ export async function createApi(config) {
       need(await sb.storage.from("attachments").upload(path, file, { contentType: file.type }));
       return sb.storage.from("attachments").getPublicUrl(path).data.publicUrl;
     },
+    // Handwriting/print OCR via the `ocr` edge function (which calls a hosted
+    // vision model). supabase-js attaches the Clerk session token for us.
+    async ocr(file) {
+      const image = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(new Error("could not read image"));
+        r.readAsDataURL(file);
+      });
+      const { data, error } = await sb.functions.invoke("ocr", { body: { image } });
+      if (error) throw new Error(error.message || "OCR request failed");
+      if (data?.error) throw new Error(data.error);
+      return data?.text ?? "";
+    },
+    ocrAvailable: true,
+
     async health() { return { ok: true, vec: true }; },
     async version() { return { version: "web", repo: "" }; },
     async updateCheck() { return { updateAvailable: false }; },

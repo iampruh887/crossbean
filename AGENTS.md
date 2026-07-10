@@ -39,6 +39,7 @@ ui/embed-worker.js       Transformers.js all-MiniLM-L6-v2 in a Web Worker
 ui/styles.css            two themes: "paper" (default) and "terminal"
 web/server.ts            web: thin static host for ui/ + /config.js from env
 supabase/migrations/     web backend: schema, RLS, RPCs, storage (run in order)
+supabase/functions/ocr/  edge function: image → hosted vision model → text (OCR)
 scripts/build-release.ts compile binary + assemble dist folder
 packaging/               Inno Setup (.iss), deb/rpm scripts, macOS .app/dmg
 test-backend.ts          headless end-to-end API tests

@@ -274,6 +274,8 @@ body {
 .boot-error .be-x { background: none; border: none; color: #fff; cursor: pointer; font-size: 14px; opacity: .8; }
 .boot-error .be-x:hover { opacity: 1; }
 
+.hidden { display: none !important; }
+
 /* Platform gating: /config.js sets body[data-platform] */
 body[data-platform="desktop"] .web-only { display: none !important; }
 body[data-platform="web"] .desktop-only { display: none !important; }
