@@ -338,16 +338,29 @@ function switchView(view) {
   }
 }
 
-// Collapse/expand the left note-list pane. State persists.
-const SIDEBAR_KEY = "cb-sidebar-collapsed";
-function initSidebarToggle() {
+// Draggable divider to resize the left note-list pane. Width persists.
+const SIDE_KEY = "cb-side-w";
+function initSidebarSplit() {
   const app = $("#app");
-  if (localStorage.getItem(SIDEBAR_KEY) === "1") app.classList.add("sidebar-collapsed");
-  $("#sidebarToggle").onclick = () => {
-    app.classList.toggle("sidebar-collapsed");
-    localStorage.setItem(SIDEBAR_KEY, app.classList.contains("sidebar-collapsed") ? "1" : "0");
-    resizeGraph(); // main pane width changed — keep the canvas crisp
-  };
+  const div = $("#sidebarSplit");
+  if (!app || !div) return;
+  localStorage.removeItem("cb-sidebar-collapsed"); // clear the old collapse flag
+  const saved = localStorage.getItem(SIDE_KEY);
+  if (saved) app.style.setProperty("--side-w", saved);
+  let dragging = false;
+  div.addEventListener("mousedown", (e) => { e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none"; });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const w = Math.max(180, Math.min(520, e.clientX)); // clamp so it can't disappear
+    app.style.setProperty("--side-w", w + "px");
+    resizeGraph();
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
+    localStorage.setItem(SIDE_KEY, app.style.getPropertyValue("--side-w") || "280px");
+  });
+  div.addEventListener("dblclick", () => { app.style.setProperty("--side-w", "280px"); localStorage.setItem(SIDE_KEY, "280px"); resizeGraph(); });
 }
 
 // Draggable divider between the writing pane and the preview. Ratio persists.
@@ -612,7 +625,7 @@ function wire() {
   $("#imgFileInput").onchange = (e) => { handleImageFiles(e.target.files); e.target.value = ""; };
 
   initEditorSplit();
-  initSidebarToggle();
+  initSidebarSplit();
 
   // OCR ("Scan text"): only shown when the adapter supports it (web)
   $("#ocrBtn").classList.toggle("hidden", !api.ocrAvailable);
