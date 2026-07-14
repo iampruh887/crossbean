@@ -215,7 +215,13 @@ export async function createApi(config) {
     },
     // Multi-vault: every vault the user belongs to, as colored clusters.
     async userGraph(threshold) {
-      return this._normalizeGraph(need(await sb.rpc("user_graph", { p_threshold: threshold, p_neighbors: 6 })));
+      const res = await sb.rpc("user_graph", { p_threshold: threshold, p_neighbors: 6 });
+      if (res.error) {
+        // migration 0007 not applied yet → fall back to the active vault's graph
+        if (/user_graph|schema cache|PGRST202|function/i.test(res.error.message || "")) return this.graph(threshold);
+        throw new Error(res.error.message);
+      }
+      return this._normalizeGraph(res.data);
     },
 
     // ---- misc ----
