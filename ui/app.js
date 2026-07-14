@@ -334,8 +334,58 @@ function switchView(view) {
   $("#graphView").classList.toggle("active", view === "graph");
   if (view === "graph") {
     resizeGraph();
-    loadGraph(Number($("#threshold").value), (id) => { switchView("editor"); selectNote(id); });
+    loadGraph(Number($("#threshold").value), openGraphNode);
   }
+}
+
+// Collapse/expand the left note-list pane. State persists.
+const SIDEBAR_KEY = "cb-sidebar-collapsed";
+function initSidebarToggle() {
+  const app = $("#app");
+  if (localStorage.getItem(SIDEBAR_KEY) === "1") app.classList.add("sidebar-collapsed");
+  $("#sidebarToggle").onclick = () => {
+    app.classList.toggle("sidebar-collapsed");
+    localStorage.setItem(SIDEBAR_KEY, app.classList.contains("sidebar-collapsed") ? "1" : "0");
+    resizeGraph(); // main pane width changed — keep the canvas crisp
+  };
+}
+
+// Draggable divider between the writing pane and the preview. Ratio persists.
+const SPLIT_KEY = "cb-edit-split";
+function initEditorSplit() {
+  const wrap = document.querySelector(".editor-wrap");
+  const div = $("#editorSplit");
+  if (!wrap || !div) return;
+  const saved = localStorage.getItem(SPLIT_KEY);
+  if (saved) wrap.style.setProperty("--edit-w", saved);
+  let dragging = false;
+  const setPct = (pct) => wrap.style.setProperty("--edit-w", Math.max(15, Math.min(85, pct)).toFixed(1) + "%");
+  div.addEventListener("mousedown", (e) => {
+    e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none";
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const r = wrap.getBoundingClientRect();
+    setPct(((e.clientX - r.left) / r.width) * 100);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
+    localStorage.setItem(SPLIT_KEY, wrap.style.getPropertyValue("--edit-w") || "50%");
+  });
+  div.addEventListener("dblclick", () => { wrap.style.setProperty("--edit-w", "50%"); localStorage.setItem(SPLIT_KEY, "50%"); });
+}
+
+// Open a graph node in the editor. On the web multi-vault graph a node may live
+// in another vault — switch to it first, then open the note.
+async function openGraphNode(node) {
+  const id = typeof node === "object" ? node.id : node;
+  const vid = typeof node === "object" ? node.vault : null;
+  if (vid && api.currentVault?.() && vid !== api.currentVault()) {
+    await switchVault(vid);
+  }
+  switchView("editor");
+  selectNote(id);
 }
 
 // --------------------------------------------------------------- images
@@ -470,7 +520,7 @@ async function switchVault(id) {
   await refreshNotes();
   // if the graph is open, rebuild it for the new vault
   if ($("#graphView").classList.contains("active")) {
-    loadGraph(Number($("#threshold").value), (nid) => { switchView("editor"); selectNote(nid); });
+    loadGraph(Number($("#threshold").value), openGraphNode);
   }
   indexMissing();
 }
@@ -561,6 +611,9 @@ function wire() {
   $("#attachImgBtn").onclick = () => $("#imgFileInput").click();
   $("#imgFileInput").onchange = (e) => { handleImageFiles(e.target.files); e.target.value = ""; };
 
+  initEditorSplit();
+  initSidebarToggle();
+
   // OCR ("Scan text"): only shown when the adapter supports it (web)
   $("#ocrBtn").classList.toggle("hidden", !api.ocrAvailable);
   $("#ocrBtn").onclick = () => $("#ocrFileInput").click();
@@ -596,9 +649,9 @@ function wire() {
   $("#themeBtn").onclick = toggleTheme;
   $("#threshold").addEventListener("input", (e) => {
     $("#thVal").textContent = Number(e.target.value).toFixed(2);
-    loadGraph(Number(e.target.value), (id) => { switchView("editor"); selectNote(id); });
+    loadGraph(Number(e.target.value), openGraphNode);
   });
-  $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), (id) => { switchView("editor"); selectNote(id); });
+  $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), openGraphNode);
 
   // delete current note with Ctrl+Shift+Backspace (now with a confirmation)
   document.addEventListener("keydown", (e) => {
@@ -617,7 +670,8 @@ async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "paper");
   document.body.dataset.platform = CONFIG.platform;
   api = await loadApi();
-  setGraphSource((threshold) => api.graph(threshold));
+  // web shows every vault (userGraph); desktop is single-vault (graph)
+  setGraphSource((threshold) => (api.userGraph ? api.userGraph(threshold) : api.graph(threshold)));
 
   if (CONFIG.platform === "web") {
     const session = await api.init();

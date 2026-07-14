@@ -193,10 +193,9 @@ export async function createApi(config) {
       const byId = new Map((await noteMetas()).map((n) => [n.id, n]));
       return hits.map((h) => ({ ...byId.get(h.id), sim: h.sim })).filter((r) => r.id != null);
     },
-    async graph(threshold) {
-      const g = need(await sb.rpc("vault_graph", { p_vault: vaultId, p_threshold: threshold, p_neighbors: 6 }));
-      // The RPC returns {id,title} nodes and {source,target,type,sim} edges.
-      // graph.js expects the desktop shape: node.degree/hasVec + edge.weight.
+    // Shared helper: normalize an RPC {nodes,edges[,vaults]} payload to the
+    // shape graph.js wants (node.degree/hasVec[/vault] + edge.weight).
+    _normalizeGraph(g) {
       const edges = (g.edges || []).map((e) => ({
         source: e.source, target: e.target, type: e.type,
         weight: e.type === "user" ? 1 : (e.sim ?? 0.3),
@@ -207,9 +206,16 @@ export async function createApi(config) {
         deg.set(e.target, (deg.get(e.target) || 0) + 1);
       }
       const nodes = (g.nodes || []).map((n) => ({
-        id: n.id, title: n.title, degree: deg.get(n.id) || 0, hasVec: true,
+        id: n.id, title: n.title, vault: n.vault, degree: deg.get(n.id) || 0, hasVec: true,
       }));
-      return { nodes, edges };
+      return { nodes, edges, vaults: g.vaults || [] };
+    },
+    async graph(threshold) {
+      return this._normalizeGraph(need(await sb.rpc("vault_graph", { p_vault: vaultId, p_threshold: threshold, p_neighbors: 6 })));
+    },
+    // Multi-vault: every vault the user belongs to, as colored clusters.
+    async userGraph(threshold) {
+      return this._normalizeGraph(need(await sb.rpc("user_graph", { p_threshold: threshold, p_neighbors: 6 })));
     },
 
     // ---- misc ----

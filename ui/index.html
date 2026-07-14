@@ -45,6 +45,7 @@
       <!-- Main -->
       <main id="main">
         <div class="tabs">
+          <button id="sidebarToggle" class="btn sidebar-toggle" title="Show/hide the note list">☰</button>
           <button class="tab active" data-view="editor">Editor</button>
           <button class="tab" data-view="graph">Graph</button>
           <div class="tab-spacer"></div>
@@ -77,6 +78,7 @@
               placeholder="Write in markdown. Link notes with [[Note Title]].&#10;&#10;Connections are found automatically from meaning — open the Graph tab."
               spellcheck="false"
             ></textarea>
+            <div id="editorSplit" class="editor-split" title="Drag to resize · double-click to reset"></div>
             <div id="preview" class="preview"></div>
           </div>
           <div class="editor-footer">

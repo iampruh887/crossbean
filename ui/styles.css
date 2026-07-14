@@ -70,6 +70,10 @@ body {
 }
 
 #app { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+#app.sidebar-collapsed { grid-template-columns: 0 1fr; }
+#app.sidebar-collapsed #sidebar { display: none; }
+.sidebar-toggle { border: none; color: var(--text-dim); font-size: 15px; line-height: 1; padding: 5px 9px; margin-right: 2px; }
+.sidebar-toggle:hover { color: var(--text); background: var(--panel); }
 
 /* Sidebar */
 #sidebar {
@@ -204,8 +208,10 @@ body {
 #groupSelect:focus, #editorVaultSelect:focus { outline: none; border-color: var(--accent); }
 #groupSelect:disabled { opacity: .5; cursor: default; }
 .bar-btn { padding: 5px 10px; font-size: 12.5px; }
-.editor-wrap { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); min-height: 0; }
+.editor-wrap { flex: 1; display: grid; grid-template-columns: var(--edit-w, 50%) 6px minmax(0, 1fr); background: var(--border); min-height: 0; }
 .editor-wrap > * { min-height: 0; } /* let grid children scroll instead of growing the page */
+.editor-split { background: var(--border); cursor: col-resize; transition: background .12s; }
+.editor-split:hover, .editor-split.dragging { background: var(--accent-2); }
 .body-input {
   background: var(--bg); border: none; resize: none; color: var(--text);
   font-family: var(--font-content); font-size: 15px; line-height: 1.8;
