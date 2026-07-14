@@ -50,7 +50,7 @@ const server = Bun.serve({
 
     if (path === "/config.js") {
       return new Response(configJs, {
-        headers: { "content-type": "text/javascript; charset=utf-8" },
+        headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
       });
     }
     if (path === "/healthz") {
@@ -60,10 +60,15 @@ const server = Bun.serve({
     const file = path === "/" ? "/index.html" : path;
     const asset = Bun.file(join(UI_DIR, file));
     if (await asset.exists()) {
+      const ext = extname(file);
+      // ui/*.js aren't content-hashed, so never cache the shell long-term
+      // (avoids serving stale code after a deploy); allow a short cache for the rest.
+      const cache = ext === ".html" ? "no-cache" : "public, max-age=300";
       return new Response(asset, {
         headers: {
-          "content-type": MIME[extname(file)] ?? "application/octet-stream",
+          "content-type": MIME[ext] ?? "application/octet-stream",
           "x-content-type-options": "nosniff",
+          "cache-control": cache,
         },
       });
     }

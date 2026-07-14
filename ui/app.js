@@ -1,5 +1,5 @@
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm";
-import { initGraph, loadGraph, resizeGraph, setGraphSource } from "/graph.js";
+import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph } from "/graph.js";
 
 // ---------------------------------------------------------------- API client
 // The adapter is chosen by /config.js: local HTTP engine on desktop,
@@ -23,7 +23,7 @@ function initEmbedder() {
     else if (m.type === "vector") { pending.get(m.id)?.resolve(m.vector); pending.delete(m.id); }
     else if (m.type === "error") { pending.get(m.id)?.reject(new Error(m.error)); pending.delete(m.id); setStatus("embed error: " + m.error); }
   };
-  worker.postMessage({ type: "warmup" });
+  // no eager warmup — the model downloads on the first embed (lazy, off the boot path)
 }
 function embed(text) {
   return new Promise((resolve, reject) => {
@@ -231,6 +231,13 @@ function renderPreview() {
   });
 }
 
+// Debounced markdown render — avoids re-parsing the whole body on every keystroke.
+let previewTimer = null;
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(renderPreview, 140);
+}
+
 function scheduleSave() {
   state.dirty = true;
   setStatus("editing…");
@@ -266,11 +273,16 @@ async function indexMissing() {
   }
 }
 
+// Remember the last text embedded per note, so saves that don't change the
+// content (e.g. a group change) don't trigger a redundant embed round-trip.
+const lastEmbedded = new Map();
 async function reindex(id, text) {
+  if (lastEmbedded.get(id) === text) return; // unchanged since last embed
   try {
     setStatus("indexing…", true);
     const vector = await embed(text);
     await api.storeEmbed(id, vector);
+    lastEmbedded.set(id, text);
     setStatus("indexed");
     setTimeout(() => setStatus(""), 1200);
     const n = state.notes.find((x) => x.id === id);
@@ -335,6 +347,8 @@ function switchView(view) {
   if (view === "graph") {
     resizeGraph();
     loadGraph(Number($("#threshold").value), openGraphNode);
+  } else {
+    stopGraph(); // don't run the physics loop while the graph is hidden
   }
 }
 
@@ -615,7 +629,7 @@ function wire() {
     titleEl.focus();
   };
   titleEl.oninput = () => { scheduleSave(); };
-  bodyEl.oninput = () => { renderPreview(); scheduleSave(); };
+  bodyEl.oninput = () => { schedulePreview(); scheduleSave(); };
 
   // grouping
   groupSelect.onchange = changeGroup;
@@ -660,9 +674,11 @@ function wire() {
   });
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => switchView(t.dataset.view)));
   $("#themeBtn").onclick = toggleTheme;
+  let thresholdTimer = null;
   $("#threshold").addEventListener("input", (e) => {
-    $("#thVal").textContent = Number(e.target.value).toFixed(2);
-    loadGraph(Number(e.target.value), openGraphNode);
+    $("#thVal").textContent = Number(e.target.value).toFixed(2); // label updates live
+    clearTimeout(thresholdTimer); // but only refetch the graph once the slider settles
+    thresholdTimer = setTimeout(() => loadGraph(Number(e.target.value), openGraphNode), 250);
   });
   $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), openGraphNode);
 

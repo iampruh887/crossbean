@@ -119,7 +119,7 @@ export async function loadGraph(threshold, openHandler) {
 
   emptyEl.style.display = nodes.length ? "none" : "grid";
   alpha = 1;
-  if (!raf) tick();
+  ensureRunning();
 }
 
 // --------------------------------------------------------------- simulation
@@ -179,8 +179,7 @@ function step() {
     n.vx *= DAMP; n.vy *= DAMP;
     n.x += n.vx * alpha; n.y += n.vy * alpha;
   }
-  alpha *= 0.985;
-  if (alpha < 0.02) alpha = 0.02; // keep a gentle simmer
+  alpha *= 0.985; // decays to ~0 so the loop can stop (see tick)
 }
 
 function draw() {
@@ -287,8 +286,17 @@ function draw() {
 function tick() {
   step();
   draw();
+  // Stop once the layout has settled and nothing is being dragged — no point
+  // burning CPU on an O(n²) physics loop for a static graph.
+  if (alpha <= 0.03 && !drag) { raf = null; return; }
   raf = requestAnimationFrame(tick);
 }
+function ensureRunning() { if (!raf) raf = requestAnimationFrame(tick); }
+function kick(a = 0.5) { alpha = Math.max(alpha, a); ensureRunning(); }
+// Fully stop the loop (e.g. when the Graph tab is hidden).
+export function stopGraph() { if (raf) { cancelAnimationFrame(raf); raf = null; } }
+// One static redraw without re-energizing physics (hover/zoom while settled).
+function redraw() { if (!raf) draw(); }
 
 // --------------------------------------------------------------- interaction
 function screenToWorld(sx, sy) {
@@ -311,7 +319,7 @@ function bindInteraction() {
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const n = nodeAt(sx, sy);
     dragMoved = false;
-    if (n) drag = { node: n, ox: sx, oy: sy };
+    if (n) { drag = { node: n, ox: sx, oy: sy }; kick(0.4); } // node drag → physics
     else drag = { pan: true, ox: sx, oy: sy, vx: view.x, vy: view.y };
   });
   window.addEventListener("mousemove", (e) => {
@@ -319,6 +327,7 @@ function bindInteraction() {
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     mouse.x = sx; mouse.y = sy;
     if (!drag) {
+      const prevH = hover, prevV = hoverVault;
       hover = nodeAt(sx, sy);
       // cluster hover (only when not over a node): test the world point vs hulls
       hoverVault = null;
@@ -327,11 +336,12 @@ function bindInteraction() {
         for (const [vid, poly] of vaultHulls) { if (pointInPoly(p.x, p.y, poly)) { hoverVault = vid; break; } }
       }
       canvas.style.cursor = hover ? "pointer" : "grab";
+      if (hover !== prevH || hoverVault !== prevV) redraw(); // one frame, no physics
       return;
     }
     dragMoved = true;
-    if (drag.pan) { view.x = drag.vx + (sx - drag.ox); view.y = drag.vy + (sy - drag.oy); }
-    else { const p = screenToWorld(sx, sy); drag.node.x = p.x; drag.node.y = p.y; drag.node.vx = 0; drag.node.vy = 0; alpha = Math.max(alpha, 0.4); }
+    if (drag.pan) { view.x = drag.vx + (sx - drag.ox); view.y = drag.vy + (sy - drag.oy); redraw(); }
+    else { const p = screenToWorld(sx, sy); drag.node.x = p.x; drag.node.y = p.y; drag.node.vx = 0; drag.node.vy = 0; kick(0.4); }
   });
   window.addEventListener("mouseup", (e) => {
     // pass the whole node so the handler can switch vaults for cross-vault nodes
@@ -347,5 +357,6 @@ function bindInteraction() {
     view.k = Math.max(0.15, Math.min(4, view.k * factor));
     view.x = sx - wx * view.k;
     view.y = sy - wy * view.k;
+    redraw(); // zoom is a view change, not physics
   }, { passive: false });
 }
