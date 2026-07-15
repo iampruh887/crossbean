@@ -82,6 +82,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 .brand { display: flex; align-items: baseline; gap: 8px; padding: 18px 16px 10px; }
 .logo { font-size: 20px; }
@@ -93,7 +94,7 @@ body {
 .side-actions { padding: 4px 16px 10px; }
 .search-box { display: flex; gap: 6px; padding: 0 16px 12px; }
 .search-box input {
-  flex: 1; background: transparent; border: 1px solid var(--border-strong);
+  flex: 1; min-width: 0; background: transparent; border: 1px solid var(--border-strong);
   border-radius: var(--radius); color: var(--text); padding: 7px 10px; font-size: 13px;
   font-family: var(--font-chrome);
 }
@@ -806,3 +807,323 @@ body[data-platform="web"] .desktop-plat-only { display: none !important; }
 
 .mini-tab:hover { border-color: var(--ai-link); background: var(--panel); }
 :root[data-theme="terminal"] .mini-tab { font-family: var(--font-chrome); }
+
+/* ============================================================
+   Bento "Home" — default landing view (#homeView)
+   A scrollable grid of tiles: continue-where-you-left-off,
+   recent notes, topic chips, a graph preview, and one AI
+   discovery. Theme-driven via CSS variables only; degrades
+   gracefully to empty states with zero notes.
+   ============================================================ */
+
+/* #homeView inherits .view.active (flex column). The inner area
+   scrolls; padding gives the bento breathing room. */
+#homeView {
+  overflow-y: auto;
+  padding: 26px 30px 40px;
+  gap: 22px;
+}
+:root[data-theme="terminal"] #homeView { padding: 18px 20px 32px; gap: 16px; }
+
+/* ---- Home header: greeting + hero "search by meaning" ---- */
+.home-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: none;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+}
+.home-greet {
+  font-family: var(--font-content);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: .2px;
+}
+:root[data-theme="paper"] .home-greet { font-weight: 500; }
+:root[data-theme="terminal"] .home-greet { font-size: 20px; }
+:root[data-theme="terminal"] .home-greet::before { content: "> "; color: var(--accent); }
+
+.home-search {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 12px 16px;
+  font-size: 15px;
+  font-family: var(--font-chrome);
+  transition: border-color .12s, background .12s;
+}
+.home-search::placeholder { color: var(--text-dim); }
+.home-search:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+:root[data-theme="terminal"] .home-search { font-size: 13.5px; padding: 10px 12px; }
+
+/* ---- Bento grid ---- */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: minmax(150px, 1fr);
+  gap: 16px;
+  flex: 1 1 auto;
+  min-height: 460px;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+}
+:root[data-theme="terminal"] .bento { gap: 12px; }
+
+/* Base tile: panel card with hairline border. */
+.bento-tile {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+}
+/* Clickable tiles (JS wires the click; we hint it). */
+.bento-tile[role="button"],
+.bento-continue,
+.bento-graph,
+.bento-discover { cursor: pointer; transition: border-color .12s, background .12s; }
+.bento-continue:hover,
+.bento-graph:hover,
+.bento-discover:hover { border-color: var(--accent); background: var(--panel-2); }
+
+/* Small uppercase eyebrow header inside a tile. */
+.bento-tile .bento-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .9px;
+  color: var(--text-dim);
+  font-weight: 700;
+  margin-bottom: 10px;
+  flex: none;
+}
+
+/* Empty-state text (zero notes). */
+.bento-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  font-style: italic;
+  font-family: var(--font-content);
+  margin: auto 0;
+}
+:root[data-theme="terminal"] .bento-empty { font-style: normal; font-family: var(--font-mono); }
+
+/* ---- Tile 1: Continue (spans 2 cols × 2 rows) ---- */
+.bento-continue {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.bento-continue .bento-continue-title {
+  font-family: var(--font-content);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 2px 0 10px;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+:root[data-theme="paper"] .bento-continue .bento-continue-title { font-weight: 500; }
+.bento-continue .bento-continue-excerpt {
+  font-family: var(--font-content);
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+}
+:root[data-theme="terminal"] .bento-continue .bento-continue-excerpt { font-size: 13px; line-height: 1.6; }
+.bento-continue .bento-resume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-2);
+  font-family: var(--font-chrome);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* ---- Tile 2: Recent (spans 2 rows — the tall/extended tile) ---- */
+.bento-recent {
+  grid-row: span 2;
+}
+.bento-recent .bento-recent-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -6px;
+}
+.bento-recent .bento-recent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.bento-recent .bento-recent-row:hover { background: var(--panel-2); }
+.bento-recent .bento-recent-row:hover { border-left-color: var(--accent); }
+.bento-recent .bento-recent-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-content);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+:root[data-theme="paper"] .bento-recent .bento-recent-title { font-weight: 500; }
+.bento-recent .bento-recent-grp {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Tile 3: Topics (frequency-weighted chips) ---- */
+.bento-topics .bento-topics-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-content: flex-start;
+  overflow: hidden;
+}
+.bento-topics .bento-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-family: var(--font-content);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+/* Frequency-weighted sizes (app.js appends -lg / -md / -sm). */
+.bento-topics .bento-topic-sm { font-size: 12px; }
+.bento-topics .bento-topic-md { font-size: 13.5px; }
+.bento-topics .bento-topic-lg { font-size: 15px; font-weight: 600; }
+:root[data-theme="paper"] .bento-topics .bento-topic-lg { font-weight: 500; }
+.bento-topics .bento-topic:hover { border-color: var(--accent-2); background: var(--panel-2); }
+.bento-topics .bento-topic .bento-topic-n {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+/* ---- Tile 4: Graph preview (inline svg sketch) ---- */
+/* app.js emits the <svg> itself with class bento-graph-sketch and sizes it
+   via a viewBox; fill the tile and let preserveAspectRatio scale it. The
+   same class is reused for the empty-state placeholder <div>. */
+.bento-graph .bento-graph-sketch {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
+  overflow: hidden;
+}
+svg.bento-graph-sketch { height: 100%; }
+/* Node/edge colours read the graph theme vars so the sketch matches the
+   real canvas graph in both themes. Nodes: themed fill with the center/
+   highlighted (first) node accented. Edges: AI-link stroke, border-strong
+   as fallback. Never hardcode hex — theme vars only. */
+.bento-graph .bento-graph-node {
+  fill: var(--g-node);
+}
+.bento-graph .bento-graph-node:first-of-type {
+  fill: var(--accent);
+}
+.bento-graph .bento-graph-edge {
+  stroke: var(--ai-link);
+  stroke-width: 1.2;
+  opacity: .55;
+}
+.bento-graph .bento-graph-cap {
+  flex: none;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+/* ---- Tile 5: Discover (one AI-suggested related pair) ---- */
+.bento-discover .bento-discover-pair {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-content);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+:root[data-theme="paper"] .bento-discover .bento-discover-pair { font-weight: 500; }
+.bento-discover .bento-discover-a,
+.bento-discover .bento-discover-b { min-width: 0; }
+.bento-discover .bento-discover-link { color: var(--accent-2); flex: none; }
+.bento-discover .bento-discover-sim {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ai-link);
+  font-family: var(--font-mono);
+  flex: none;
+}
+.bento-discover .bento-discover-why {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  font-family: var(--font-content);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+:root[data-theme="terminal"] .bento-discover .bento-discover-why { font-family: var(--font-mono); font-size: 11.5px; }
+
+/* Narrow windows: collapse to a single column so tiles never squash. */
+@media (max-width: 720px) {
+  .bento { grid-template-columns: 1fr; }
+  .bento-continue,
+  .bento-recent { grid-column: auto; grid-row: auto; }
+  .bento-continue { grid-row: auto; }
+  .bento-recent .bento-recent-list { max-height: 320px; }
+}

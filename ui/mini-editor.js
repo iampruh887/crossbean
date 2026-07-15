@@ -93,8 +93,14 @@ export function initMiniEditors(hostEl, { noteLoader, renderMarkdown, onExpand }
   // ---- find a window by noteId (for connection line lookup) -----------------
   function findWinByNoteId(noteId) {
     // Return the most recently opened floating window for a given noteId.
-    // (Multiple windows for the same note are unusual but legal.)
-    return windows.find((w) => w.noteId === noteId && w.state === "floating") ?? null;
+    // Array.find returns the FIRST (oldest) match, so walk backwards to get the
+    // LAST (most recent).  (Multiple windows for the same note are unusual but
+    // legal.)
+    for (let i = windows.length - 1; i >= 0; i--) {
+      const w = windows[i];
+      if (w.noteId === noteId && w.state === "floating") return w;
+    }
+    return null;
   }
 
   // ---- apply z to element ----------------------------------------------------
@@ -364,6 +370,18 @@ export function initMiniEditors(hostEl, { noteLoader, renderMarkdown, onExpand }
 
     ensureLayers();
 
+    // Dedup: if a FLOATING window already exists for this note, don't open a
+    // duplicate — raise the existing one to the front, re-tile, and redraw the
+    // connection lines, then hand it straight back.
+    const existing = findWinByNoteId(id);
+    if (existing) {
+      existing.z = nextZ();
+      applyZ(existing);
+      relayout();
+      drawConnections();
+      return existing;
+    }
+
     const uid = `mini-${++uidSeq}`;
 
     // Default size — relayout() will position the window after insertion.
@@ -484,32 +502,72 @@ export function initMiniEditors(hostEl, { noteLoader, renderMarkdown, onExpand }
     return win;
   }
 
-  // ---- scroll to character offset in rendered content ------------------------
-  // Walks text nodes to find the one containing the matchStart offset, then
-  // scrolls that node into view inside the mini-body scroll container.
+  // ---- scroll to a match in rendered content ---------------------------------
+  // charOffset is an index into the RAW markdown source, but the rendered HTML
+  // has markdown syntax (#, **, [](), [[ ]], …) stripped, so raw offsets don't
+  // line up with rendered text-node offsets.  Instead we take a short phrase
+  // from the raw text at the offset, strip its formatting, and search the
+  // rendered text for that phrase — then scroll the match into view.
   function scrollToMatch(containerEl, rawText, charOffset) {
     if (!rawText || charOffset == null) return;
-    let walked = 0;
-    const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      if (walked + node.length >= charOffset) {
-        // This text node contains the target offset.
-        const range = document.createRange();
-        const localOffset = Math.min(charOffset - walked, node.length);
-        range.setStart(node, localOffset);
-        range.collapse(true);
-        const rect = range.getBoundingClientRect();
-        const contRect = containerEl.getBoundingClientRect();
-        if (rect.top < contRect.top || rect.bottom > contRect.bottom) {
-          // Scroll the element (not window) so the match is near the top.
-          const relTop = rect.top - contRect.top + containerEl.scrollTop - 8;
-          containerEl.scrollTo({ top: relTop, behavior: "smooth" });
-        }
-        return;
+
+    // Scroll a DOM Range so its match sits near the top of the container.
+    function scrollRangeIntoView(range) {
+      const rect = range.getBoundingClientRect();
+      const contRect = containerEl.getBoundingClientRect();
+      if (rect.top < contRect.top || rect.bottom > contRect.bottom) {
+        const relTop = rect.top - contRect.top + containerEl.scrollTop - 8;
+        containerEl.scrollTo({ top: relTop, behavior: "smooth" });
       }
-      walked += node.length;
     }
+
+    // Proportional fallback: scroll to roughly where the offset falls.
+    function scrollByProportion() {
+      const frac = Math.max(0, Math.min(1, charOffset / rawText.length));
+      containerEl.scrollTo({ top: frac * containerEl.scrollHeight, behavior: "smooth" });
+    }
+
+    // Build a plain-word search phrase from the raw markdown at the offset.
+    const snippet = rawText.slice(charOffset, charOffset + 80);
+    const plain = snippet
+      .replace(/!?\[\[([^\]|]*)(?:\|[^\]]*)?\]\]/g, "$1")  // [[wikilink]] / [[a|b]] -> a
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")           // [text](url) -> text
+      .replace(/[#*_`>~]/g, "")                             // markdown punctuation
+      .replace(/\s+/g, " ")
+      .trim();
+    const phrase = plain.split(" ").filter(Boolean).slice(0, 6).join(" ");
+
+    if (phrase.length >= 3) {
+      // Accumulate rendered text across nodes so a phrase spanning several text
+      // nodes still matches; remember each node's start position to build a Range.
+      const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT);
+      const segments = [];  // { node, start } — start = index into `haystack`
+      let haystack = "";
+      let node;
+      while ((node = walker.nextNode())) {
+        segments.push({ node, start: haystack.length });
+        haystack += node.textContent;
+      }
+
+      const hit = haystack.toLowerCase().indexOf(phrase.toLowerCase());
+      if (hit !== -1) {
+        // Find the text node (and local offset) containing `hit`.
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          const end = seg.start + seg.node.length;
+          if (hit < end) {
+            const range = document.createRange();
+            range.setStart(seg.node, hit - seg.start);
+            range.collapse(true);
+            scrollRangeIntoView(range);
+            return;
+          }
+        }
+      }
+    }
+
+    // Phrase not found (or too short) — approximate by proportion.
+    scrollByProportion();
   }
 
   // ---- destroyAll ------------------------------------------------------------

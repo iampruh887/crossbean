@@ -115,6 +115,8 @@ async function refreshNotes(selectId) {
   renderNoteList();
   if (selectId != null) selectNote(selectId);
   else if (state.currentId == null && state.notes.length) selectNote(state.notes[0].id);
+  // Keep Home fresh when it's the visible view (cheap; tiles guard their own I/O).
+  if ($("#homeView")?.classList.contains("active")) renderHome();
 }
 
 // A single note row (title, indexed dot, optional similarity, delete button).
@@ -251,7 +253,7 @@ async function changeGroup() {
 
 // Render markdown text into an arbitrary element, including [[wikilink]] → link
 // substitution and click-binding. Used by both the main preview and mini-editors.
-export function renderMarkdownInto(el, text) {
+export function renderMarkdownInto(el, text, opts = {}) {
   const raw = text || "";
   const withLinks = raw.replace(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g, (_, t) => `[${t}](wikilink:${encodeURIComponent(t.trim())})`);
   el.innerHTML = marked.parse(withLinks, { breaks: true });
@@ -260,6 +262,9 @@ export function renderMarkdownInto(el, text) {
     a.onclick = (e) => {
       e.preventDefault();
       const title = decodeURIComponent(a.getAttribute("href").slice("wikilink:".length));
+      // Callers (e.g. mini-editors) can override navigation so a wikilink click
+      // doesn't hijack the main editor. Default: find the note and open it.
+      if (typeof opts.onWikilink === "function") { opts.onWikilink(title); return; }
       const target = state.notes.find((x) => x.title.toLowerCase() === title.toLowerCase());
       if (target) selectNote(target.id);
     };
@@ -368,9 +373,12 @@ async function loadSuggestions(id) {
 // --------------------------------------------------------- cross-vault spotlight
 async function spotlightCurrent() {
   if (state.currentId == null) return;
+  const jobId = state.currentId;
   try {
-    const hits = await api.suggestCross(state.currentId, 8);
-    focusNode(state.currentId, hits.map((h) => h.id), hits);
+    const hits = await api.suggestCross(jobId, 8);
+    // Bail if the user switched notes while we were fetching cross-vault hits.
+    if (state.currentId !== jobId) return;
+    focusNode(jobId, hits.map((h) => h.id), hits);
   } catch (_) { /* never break selection */ }
 }
 
@@ -403,15 +411,224 @@ function toggleTheme() {
 // -------------------------------------------------------------------- tabs
 function switchView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+  const homeView = $("#homeView");
+  if (homeView) homeView.classList.toggle("active", view === "home");
   $("#editorView").classList.toggle("active", view === "editor");
   $("#graphView").classList.toggle("active", view === "graph");
   if (view === "graph") {
     resizeGraph();
     loadGraph(Number($("#threshold").value), openMiniFromNode).then(spotlightCurrent);
   } else {
-    stopGraph(); // don't run the physics loop while the graph is hidden
+    stopGraph(); // don't run the physics loop while the graph is hidden (home + editor)
     if (view === "editor") clearFocus();
+    if (view === "home") { clearFocus(); renderHome(); }
   }
+}
+
+// -------------------------------------------------------------------- bento home
+// The default landing view: a grid of "tiles" populated from live data. Each
+// tile degrades to a graceful empty state so it never crashes with zero notes.
+// JS owns the tile innerDOM (the HTML ships the <section> empty); CSS owns layout.
+
+// Best-effort excerpt of a note body for the "Continue" tile — strips markdown
+// syntax noise so the preview reads like prose rather than raw source.
+function excerptOf(body, max = 220) {
+  const plain = String(body || "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")       // images
+    .replace(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g, "$1") // wikilinks → text
+    .replace(/[#>*_`~-]/g, " ")                 // heading/emphasis/list marks
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > max ? plain.slice(0, max).trimEnd() + "…" : plain;
+}
+
+// A friendly, time-of-day greeting.
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 5) return "Late night";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+// Render the whole Home view from current state + api. Cheap enough to call on
+// boot and after notes change; each tile guards its own async work.
+function renderHome() {
+  const home = $("#homeView");
+  if (!home) return;
+  const greet = $(".home-greet");
+  if (greet) greet.textContent = `${greeting()} — ${state.notes.length} note${state.notes.length === 1 ? "" : "s"}`;
+  renderContinueTile();
+  renderRecentTile();
+  renderTopicsTile();
+  renderGraphTile();
+  renderDiscoverTile();
+}
+
+// Tile 1 — the most-recently-edited note: title + excerpt + Resume.
+async function renderContinueTile() {
+  const el = $("#bentoContinue");
+  if (!el) return;
+  const note = state.notes[0];
+  if (!note) {
+    el.innerHTML = `<div class="bento-label">Continue</div>
+      <div class="bento-empty">No notes yet — create one to get started.</div>`;
+    return;
+  }
+  // Show title immediately; fetch the body for a richer excerpt.
+  el.innerHTML = `<div class="bento-label">Continue</div>
+    <div class="bento-continue-title">${escapeHtml(note.title || "Untitled")}</div>
+    <div class="bento-continue-excerpt">${escapeHtml(note.snippet || "")}</div>
+    <button class="bento-resume">Resume →</button>`;
+  el.querySelector(".bento-resume").onclick = (e) => { e.stopPropagation(); openNoteInEditor(note.id); };
+  el.onclick = () => openNoteInEditor(note.id);
+  try {
+    const full = await api.note(note.id);
+    if (full && !full.error && state.notes[0]?.id === note.id) {
+      const exEl = el.querySelector(".bento-continue-excerpt");
+      if (exEl) exEl.textContent = excerptOf(full.body) || note.snippet || "";
+    }
+  } catch (_) { /* keep the snippet fallback */ }
+}
+
+// Tile 2 — the tall list of recent notes (title + group).
+function renderRecentTile() {
+  const el = $("#bentoRecent");
+  if (!el) return;
+  const recent = state.notes.slice(0, 10);
+  if (!recent.length) {
+    el.innerHTML = `<div class="bento-label">Recent notes</div>
+      <div class="bento-empty">Your recent notes will appear here.</div>`;
+    return;
+  }
+  const rows = recent.map((n) => `
+    <div class="bento-recent-row" data-id="${n.id}">
+      <span class="bento-recent-title">${escapeHtml(n.title || "Untitled")}</span>
+      ${n.grp ? `<span class="bento-recent-grp">${escapeHtml(n.grp)}</span>` : ""}
+    </div>`).join("");
+  el.innerHTML = `<div class="bento-label">Recent notes</div>
+    <div class="bento-recent-list">${rows}</div>`;
+  el.querySelectorAll(".bento-recent-row").forEach((row) => {
+    row.onclick = () => openNoteInEditor(Number(row.dataset.id));
+  });
+}
+
+// Tile 3 — topic chips from note groups, weighted by frequency.
+function renderTopicsTile() {
+  const el = $("#bentoTopics");
+  if (!el) return;
+  const counts = new Map();
+  for (const n of state.notes) {
+    if (!n.grp) continue;
+    counts.set(n.grp, (counts.get(n.grp) || 0) + 1);
+  }
+  const topics = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  if (!topics.length) {
+    el.innerHTML = `<div class="bento-label">Topics</div>
+      <div class="bento-empty">Group notes into folders to see topics here.</div>`;
+    return;
+  }
+  const max = topics[0][1];
+  const chips = topics.map(([name, count]) => {
+    // Weight the chip size into 3 buckets by relative frequency.
+    const w = count >= max ? "lg" : count >= Math.ceil(max / 2) ? "md" : "sm";
+    return `<button class="bento-topic bento-topic-${w}" data-grp="${escapeHtml(name)}">${escapeHtml(name)} <span class="bento-topic-n">${count}</span></button>`;
+  }).join("");
+  el.innerHTML = `<div class="bento-label">Topics</div>
+    <div class="bento-topics-wrap">${chips}</div>`;
+  el.querySelectorAll(".bento-topic").forEach((chip) => {
+    chip.onclick = (e) => { e.stopPropagation(); filterByGroup(chip.dataset.grp); };
+  });
+}
+
+// Tile 4 — a tiny inline SVG sketch of the graph + a "N notes · M links" caption.
+async function renderGraphTile() {
+  const el = $("#bentoGraph");
+  if (!el) return;
+  el.onclick = () => switchView("graph");
+  const placeholder = (caption) => {
+    el.innerHTML = `<div class="bento-label">Graph</div>
+      <div class="bento-graph-sketch bento-empty">Open the graph →</div>
+      <div class="bento-graph-cap">${escapeHtml(caption || "")}</div>`;
+  };
+  let data;
+  try {
+    const src = api.userGraph ? api.userGraph : api.graph;
+    data = await src.call(api, Number($("#threshold")?.value ?? 0.3));
+  } catch (_) { placeholder(""); return; }
+  const nodes = (data && data.nodes) || [];
+  const edges = (data && (data.edges || data.links)) || [];
+  const caption = `${nodes.length} note${nodes.length === 1 ? "" : "s"} · ${edges.length} link${edges.length === 1 ? "" : "s"}`;
+  if (!nodes.length) { placeholder(caption); return; }
+
+  // Pick the most-connected nodes so the sketch shows a meaningful cluster.
+  const top = [...nodes].sort((a, b) => (b.degree || 0) - (a.degree || 0)).slice(0, 10);
+  const idx = new Map(top.map((n, i) => [n.id, i]));
+  const W = 240, H = 150, cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 16;
+  const pos = top.map((n, i) => {
+    if (top.length === 1) return { x: cx, y: cy };
+    const a = (i / top.length) * Math.PI * 2 - Math.PI / 2;
+    return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
+  });
+  // Draw only edges whose both endpoints are in the sketched subset (cap ~14).
+  const lines = [];
+  for (const e of edges) {
+    const s = idx.get(e.source?.id ?? e.source);
+    const t = idx.get(e.target?.id ?? e.target);
+    if (s == null || t == null) continue;
+    lines.push(`<line x1="${pos[s].x.toFixed(1)}" y1="${pos[s].y.toFixed(1)}" x2="${pos[t].x.toFixed(1)}" y2="${pos[t].y.toFixed(1)}" class="bento-graph-edge" />`);
+    if (lines.length >= 14) break;
+  }
+  const dots = pos.map((p, i) => {
+    const r = 3 + Math.min(4, top[i].degree || 0);
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" class="bento-graph-node" />`;
+  }).join("");
+  el.innerHTML = `<div class="bento-label">Graph</div>
+    <svg class="bento-graph-sketch" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      ${lines.join("")}${dots}
+    </svg>
+    <div class="bento-graph-cap">${escapeHtml(caption)}</div>`;
+}
+
+// Tile 5 — one AI-suggested related pair for the most-recent note. Hidden if
+// there's no note or no suggestion.
+async function renderDiscoverTile() {
+  const el = $("#bentoDiscover");
+  if (!el) return;
+  const note = state.notes[0];
+  el.classList.remove("hidden");
+  if (!note) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  let hits = [];
+  try { hits = await api.suggestCross(note.id, 5); } catch (_) { hits = []; }
+  // Bail if notes changed under us while awaiting.
+  if (state.notes[0]?.id !== note.id) return;
+  const hit = (hits || [])[0];
+  if (!hit) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const pct = (hit.sim * 100).toFixed(0);
+  el.innerHTML = `<div class="bento-label">Discover</div>
+    <div class="bento-discover-pair">
+      <span class="bento-discover-a">${escapeHtml(note.title || "Untitled")}</span>
+      <span class="bento-discover-link">↔</span>
+      <span class="bento-discover-b">${escapeHtml(hit.title || "?")}</span>
+      <span class="bento-discover-sim">${Number(hit.sim).toFixed(2)}</span>
+    </div>
+    <div class="bento-discover-why">${pct}% similar in meaning — you might want to link these.</div>`;
+  el.onclick = () => openNoteInEditor(hit.id);
+}
+
+// Open a note in the editor from a Home tile (select + switch).
+function openNoteInEditor(id) {
+  selectNote(id);
+  switchView("editor");
+}
+
+// Run a Home topic chip: seed the sidebar search box and filter the note list
+// to that group (reusing the existing list renderer with a filtered set).
+function filterByGroup(grp) {
+  const search = $("#searchInput");
+  if (search) search.value = grp;
+  const items = state.notes.filter((n) => n.grp === grp);
+  renderNoteList(items);
 }
 
 // Draggable divider to resize the left note-list pane. Width persists.
@@ -503,7 +720,7 @@ function initWorkspaceSplits() {
     const key = div.dataset.split;
     const [leftKey, rightKey] = key.split("-");
     let dragging = false;
-    let startX, startRightW;
+    let startX, startRightW, pendingRightW;
 
     div.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -514,6 +731,7 @@ function initWorkspaceSplits() {
       dragging = true;
       startX = e.clientX;
       startRightW = elR.getBoundingClientRect().width;
+      pendingRightW = startRightW;
       div.classList.add("dragging");
       document.body.style.userSelect = "none";
       div.setPointerCapture(e.pointerId);
@@ -530,15 +748,21 @@ function initWorkspaceSplits() {
       // without changing a neighboring pane's saved width.
       const newR = Math.max(80, startRightW - delta);
       elR.style.flexBasis = newR + "px";
-      const cur = loadPaneWidths();
-      cur[rightKey] = newR;
-      savePaneWidths(cur);
+      // Accumulate the width in-drag; persist once on pointerup (no localStorage
+      // thrash on every move).
+      pendingRightW = newR;
       if (_intraInstance) _intraInstance.resize();
     });
 
     const stopDragging = (e) => {
       if (!dragging) return;
       dragging = false;
+      // Commit the final width to localStorage exactly once.
+      if (pendingRightW != null) {
+        const cur = loadPaneWidths();
+        cur[rightKey] = pendingRightW;
+        savePaneWidths(cur);
+      }
       if (e?.pointerId != null && div.hasPointerCapture(e.pointerId)) {
         div.releasePointerCapture(e.pointerId);
       }
@@ -734,6 +958,9 @@ function insertAtCursor(text) {
 async function handleImageFiles(files) {
   const imgs = [...files].filter((f) => f.type.startsWith("image/"));
   if (!imgs.length || state.currentId == null) return;
+  // Pin the note we started on; if the user switches away mid-upload we must
+  // not rewrite the (now different) textarea and corrupt the other note.
+  const jobId = state.currentId;
   for (const f of imgs) {
     const alt = (f.name || "image").replace(/\.[a-z0-9]+$/i, "").replace(/[\[\]]/g, "");
     // Insert a temporary uploading placeholder so the user sees progress.
@@ -742,17 +969,23 @@ async function handleImageFiles(files) {
     try {
       setStatus(`uploading ${f.name}…`, true);
       const url = await api.upload(f);
-      // Replace the placeholder with the real URL in-place.
-      bodyEl.value = bodyEl.value.replace(placeholder, `\n![${alt}](${url})\n`);
-      renderPreview();
-      scheduleSave();
+      // Only rewrite the body if we're still on the same note. A function
+      // replacement inserts the URL literally (so $&, $', $` in the URL aren't
+      // interpreted as replacement patterns).
+      if (state.currentId === jobId) {
+        bodyEl.value = bodyEl.value.replace(placeholder, () => `\n![${alt}](${url})\n`);
+        renderPreview();
+        scheduleSave();
+      }
       setStatus("image added");
       setTimeout(() => setStatus(""), 1200);
     } catch (e) {
       // Remove the placeholder and surface the error; continue with remaining files.
-      bodyEl.value = bodyEl.value.replace(placeholder, "");
-      renderPreview();
-      scheduleSave();
+      if (state.currentId === jobId) {
+        bodyEl.value = bodyEl.value.replace(placeholder, () => "");
+        renderPreview();
+        scheduleSave();
+      }
       console.error("[crossbean] image upload failed:", e);
       setStatus("image upload failed: " + e.message);
     }
@@ -768,6 +1001,9 @@ async function runOcr(filesOrFile) {
   const files = [...(filesOrFile instanceof FileList ? filesOrFile : [filesOrFile])]
     .filter((f) => f && f.type.startsWith("image/"));
   if (!files.length) return;
+  // Pin the note we started on so uploads, attachments and the final refresh
+  // all target it even if the user switches notes mid-scan.
+  const jobId = state.currentId;
   _ocrInFlight = true;
   try {
     for (let i = 0; i < files.length; i++) {
@@ -777,17 +1013,19 @@ async function runOcr(filesOrFile) {
       // (1) Upload the scanned image so it also lands in Attachments.
       try {
         const url = await api.upload(f);
-        await api.addAttachment(state.currentId, { url, name: f.name, mime: f.type });
+        await api.addAttachment(jobId, { url, name: f.name, mime: f.type });
       } catch (uploadErr) {
         console.error("[crossbean] OCR attachment upload failed:", uploadErr);
         // Non-fatal: continue to OCR anyway.
       }
-      // (2) Extract text and insert at cursor.
+      // (2) Extract text and insert at cursor — only if still on the same note.
       try {
         const text = (await api.ocr(f)).trim();
         if (!text) { setStatus(`${prefix}no text found`); setTimeout(() => setStatus(""), 1500); continue; }
-        const lead = i === 0 && bodyEl.value && !bodyEl.value.endsWith("\n") ? "\n\n" : (i > 0 ? "\n\n" : "");
-        insertAtCursor(lead + text + "\n");
+        if (state.currentId === jobId) {
+          const lead = i === 0 && bodyEl.value && !bodyEl.value.endsWith("\n") ? "\n\n" : (i > 0 ? "\n\n" : "");
+          insertAtCursor(lead + text + "\n");
+        }
         setStatus(`${prefix}text extracted`);
         if (i === files.length - 1) setTimeout(() => setStatus(""), 1500);
       } catch (e) {
@@ -796,7 +1034,7 @@ async function runOcr(filesOrFile) {
     }
   } finally {
     _ocrInFlight = false;
-    renderAttachments(state.currentId);
+    renderAttachments(jobId);
   }
 }
 
@@ -807,6 +1045,9 @@ async function renderAttachments(noteId) {
   if (!listEl || noteId == null) { if (listEl) listEl.innerHTML = ""; return; }
   let items = [];
   try { items = await api.listAttachments(noteId); } catch (_) { /* non-fatal */ }
+  // The user may have switched notes while we were fetching — don't clobber the
+  // now-current note's attachments pane.
+  if (noteId !== state.currentId) return;
   listEl.innerHTML = "";
   for (const att of items) {
     const el = document.createElement("div");
@@ -826,9 +1067,27 @@ async function renderAttachments(noteId) {
 
 // --------------------------------------------------------------- intra-graph
 // Per-note sentence → vector cache (avoids re-embedding on slider changes).
-const _intraVecCache = new Map(); // note-text-key -> Map(sentenceText -> vector)
+const _intraVecCache = new Map(); // note-key -> Map(sentenceText -> vector)
+const _INTRA_CACHE_CAP = 6;       // keep sentence vectors for at most N recent notes
 let _intraInstance = null;        // current createIntraGraph() handle
 let _intraRefreshTimer = null;
+
+// Ensure a per-note sentence-vector cache exists and is the most-recently-used.
+// Bounds total memory: Maps keep insertion order, so re-inserting on access
+// makes the first key the oldest — evict it once we exceed the cap.
+function touchIntraCache(key) {
+  if (_intraVecCache.has(key)) {
+    const existing = _intraVecCache.get(key);
+    _intraVecCache.delete(key);
+    _intraVecCache.set(key, existing);
+  } else {
+    _intraVecCache.set(key, new Map());
+  }
+  while (_intraVecCache.size > _INTRA_CACHE_CAP) {
+    const oldest = _intraVecCache.keys().next().value;
+    _intraVecCache.delete(oldest);
+  }
+}
 
 
 async function refreshIntraGraph() {
@@ -838,6 +1097,9 @@ async function refreshIntraGraph() {
     if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
     return;
   }
+
+  // Pin the note we're building for; bail later if the user switches notes.
+  const jobId = state.currentId;
 
   const text = bodyEl.value || "";
   if (!text.trim()) {
@@ -854,8 +1116,8 @@ async function refreshIntraGraph() {
   if (intraPane) intraPane.classList.add("intra-busy");
 
   // Use per-note cache keyed by (noteId, sentenceText).
-  const cacheKey = String(state.currentId);
-  if (!_intraVecCache.has(cacheKey)) _intraVecCache.set(cacheKey, new Map());
+  const cacheKey = String(jobId);
+  touchIntraCache(cacheKey);
   const sentCache = _intraVecCache.get(cacheKey);
 
   const vectors = [];
@@ -869,6 +1131,12 @@ async function refreshIntraGraph() {
       }
     }
     vectors.push(sentCache.get(s.text));
+  }
+
+  // The user may have switched notes while we were embedding — abandon this run.
+  if (state.currentId !== jobId) {
+    if (intraPane) intraPane.classList.remove("intra-busy");
+    return;
   }
 
   if (intraPane) intraPane.classList.remove("intra-busy");
@@ -886,6 +1154,8 @@ async function refreshIntraGraph() {
       },
     });
   }
+  // Final stale check right before painting (creating the instance above yields).
+  if (state.currentId !== jobId) return;
   if (_intraInstance) {
     _intraInstance.setData(nodes, edges);
     _intraInstance.resize();
@@ -986,6 +1256,9 @@ async function switchVault(id) {
 
   state.currentId = null; state.currentGroup = ""; state.dirty = false;
   titleEl.value = ""; bodyEl.value = ""; renderPreview(); suggestionsEl.innerHTML = "";
+  // Clear per-note UI that belonged to the old vault's note.
+  renderAttachments(null);
+  if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
   await refreshNotes();
   // if the graph is open, rebuild it for the new vault
   if ($("#graphView").classList.contains("active")) {
@@ -1194,6 +1467,16 @@ function wire() {
     if (e.key === "Enter") runSearch();
     if (e.key === "Escape") { e.target.value = ""; renderNoteList(); }
   });
+  // Home hero search: mirror into the sidebar search and run the existing path,
+  // so results populate the note list (reachable from the Editor/sidebar).
+  const homeSearch = $("#homeSearch");
+  if (homeSearch) homeSearch.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const q = e.target.value.trim();
+    const side = $("#searchInput");
+    if (side) side.value = q;
+    runSearch();
+  });
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => switchView(t.dataset.view)));
   $("#themeBtn").onclick = toggleTheme;
   let thresholdTimer = null;
@@ -1238,7 +1521,15 @@ async function boot() {
   // Mini-editor manager — must be created after DOM is ready and api is set.
   miniMgr = initMiniEditors(document.body, {
     noteLoader: (id) => api.noteAny ? api.noteAny(id) : api.note(id),
-    renderMarkdown: (el, md) => renderMarkdownInto(el, md),
+    // In a mini-editor, a wikilink opens another mini (or reports a cross-vault
+    // miss) instead of hijacking the main editor.
+    renderMarkdown: (el, md) => renderMarkdownInto(el, md, {
+      onWikilink: (title) => {
+        const t = state.notes.find((x) => x.title.toLowerCase() === title.toLowerCase());
+        if (t) openMiniFromNode({ id: t.id, title: t.title });
+        else setStatus("linked note is in another vault");
+      },
+    }),
     onExpand: ({ id, vault, matchStart, matchEnd }) => openMiniExpand(id, vault, matchStart, matchEnd),
   });
 
@@ -1264,6 +1555,11 @@ async function boot() {
       await refreshNotes(id);
     } catch { /* viewer role — fine */ }
   }
+
+  // Home is the default landing view (the HTML marks it active). Populate its
+  // tiles now; boot must NOT switchView("editor") — selectNote() above only
+  // loaded the most-recent note into editor state, it didn't change the view.
+  renderHome();
 
   // Restore persisted mini-windows for the current vault (Q5).
   // Runs quietly after notes are ready; never crashes boot on load failure.

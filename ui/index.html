@@ -51,15 +51,31 @@
       <!-- Main -->
       <main id="main">
         <div class="tabs">
-          <button class="tab active" data-view="editor">Editor</button>
+          <button class="tab active" data-view="home">Home</button>
+          <button class="tab" data-view="editor">Editor</button>
           <button class="tab" data-view="graph">Graph</button>
           <div class="tab-spacer"></div>
           <span id="status" class="status"></span>
           <button id="themeBtn" class="btn theme-btn" title="Switch theme"></button>
         </div>
 
+        <!-- Home view (default landing) -->
+        <section id="homeView" class="view active">
+          <div class="home-head">
+            <div class="home-greet"></div>
+            <input id="homeSearch" class="home-search" placeholder="Search by meaning…" />
+          </div>
+          <div class="bento">
+            <section class="bento-tile bento-continue" id="bentoContinue"></section>
+            <section class="bento-tile bento-recent" id="bentoRecent"></section>
+            <section class="bento-tile bento-topics" id="bentoTopics"></section>
+            <section class="bento-tile bento-graph" id="bentoGraph"></section>
+            <section class="bento-tile bento-discover" id="bentoDiscover"></section>
+          </div>
+        </section>
+
         <!-- Editor view -->
-        <section id="editorView" class="view active">
+        <section id="editorView" class="view">
           <input id="titleInput" class="title-input" placeholder="Untitled" />
           <div class="editor-bar">
             <label class="grp-picker cloud-only" title="Active vault">
