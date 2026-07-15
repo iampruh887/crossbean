@@ -9,6 +9,16 @@ let raf = null, alpha = 0;
 const view = { x: 0, y: 0, k: 1 }; // pan + zoom
 let drag = null, hover = null, dragMoved = false;
 
+// Spotlight / focus state — zero permanent mutation of node/edge data.
+// focusId:      the note id currently spotlighted (number|null)
+// focusSet:     Set of node ids that stay fully visible
+// spotEdges:    transient AI edges for matches that have no existing edge
+// pendingFocus: [noteId, neighborIds, matches] queued before graph loaded
+let focusId = null;
+const focusSet = new Set();
+let spotEdges = [];
+let pendingFocus = null;
+
 // Multi-vault (web): each vault is a colored cluster with a boundary hull.
 let vaultById = new Map();   // vaultId -> { id, name, owner, hue }
 let vaultHulls = new Map();  // vaultId -> world-space polygon (for hover hit-test)
@@ -118,6 +128,14 @@ export async function loadGraph(threshold, openHandler) {
   edges = data.edges.filter((e) => nodeById.has(e.source) && nodeById.has(e.target));
 
   emptyEl.style.display = nodes.length ? "none" : "grid";
+
+  // If a focus was requested before the graph was ready, apply it now.
+  if (pendingFocus) {
+    const pf = pendingFocus;
+    pendingFocus = null;
+    focusNode(pf[0], pf[1], pf[2]);
+  }
+
   alpha = 1;
   ensureRunning();
 }
@@ -229,22 +247,47 @@ function draw() {
     }
   }
 
-  // edges
+  const focused = focusId !== null;
+
+  // edges (existing) — dim those not in focusSet when spotlight is active
   for (const e of edges) {
     const a = nodeById.get(e.source), b = nodeById.get(e.target);
+    const inFocus = !focused || (focusSet.has(e.source) && focusSet.has(e.target));
+    const baseAlpha = e.type === "user" ? 0.6 : 0.3 + Math.min(0.5, ((e.weight ?? 0.3) - 0.25));
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.strokeStyle = e.type === "user" ? C.user : C.ai;
-    ctx.globalAlpha = e.type === "user" ? 0.6 : 0.3 + Math.min(0.5, ((e.weight ?? 0.3) - 0.25));
+    ctx.globalAlpha = inFocus ? baseAlpha : baseAlpha * 0.12;
     ctx.lineWidth = (e.type === "user" ? 1.6 : 1.0) / view.k;
     ctx.stroke();
   }
+
+  // spotEdges — transient AI edges shown only while focused
+  if (focused) {
+    for (const e of spotEdges) {
+      const a = nodeById.get(e.source), b = nodeById.get(e.target);
+      if (!a || !b) continue;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = C.ai;
+      ctx.globalAlpha = 0.3 + Math.min(0.5, ((e.weight ?? 0.3) - 0.25));
+      ctx.lineWidth = 1.0 / view.k;
+      ctx.setLineDash([4 / view.k, 4 / view.k]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
   ctx.globalAlpha = 1;
 
-  // nodes
+  // nodes — dim those outside focusSet; accent ring on focusId; hover wins last
   for (const n of nodes) {
     const r = 4 + Math.sqrt(n.degree || 0) * 2.4; // guard: missing degree must never yield NaN (invisible node)
+    const inFocus = !focused || focusSet.has(n.id);
+    const dimMul = inFocus ? 1 : 0.12;
+
+    ctx.globalAlpha = dimMul;
     ctx.beginPath();
     ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     const vc = vaultById.get(n.vault);
@@ -255,7 +298,18 @@ function draw() {
     ctx.strokeStyle = C.bg;
     ctx.stroke();
 
+    // accent ring on the focused node
+    if (focused && n.id === focusId && hover !== n) {
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 4 / view.k, 0, Math.PI * 2);
+      ctx.strokeStyle = C.hover;
+      ctx.lineWidth = 2 / view.k;
+      ctx.stroke();
+    }
+
     if (view.k > 0.55 || hover === n || n.degree > 2) {
+      ctx.globalAlpha = dimMul;
       ctx.fillStyle = C.label;
       ctx.font = `${12 / view.k}px ${C.font}`;
       ctx.textAlign = "center";
@@ -263,6 +317,7 @@ function draw() {
       ctx.fillText(label, n.x, n.y + r + 12 / view.k);
     }
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
 
   // vault tooltip (screen space): name + owner when hovering a cluster
@@ -297,6 +352,54 @@ function kick(a = 0.5) { alpha = Math.max(alpha, a); ensureRunning(); }
 export function stopGraph() { if (raf) { cancelAnimationFrame(raf); raf = null; } }
 // One static redraw without re-energizing physics (hover/zoom while settled).
 function redraw() { if (!raf) draw(); }
+
+// --------------------------------------------------------------- spotlight / focus
+
+// focusNode(noteId, neighborIds?, matches?)
+//   noteId      — the note to spotlight (number)
+//   neighborIds — ids of explicit neighbors to keep fully visible ([])
+//   matches     — array of {id, sim} from a similarity search ([])
+//
+// All dimming is a draw-time multiplier; no node/edge state is mutated.
+export function focusNode(noteId, neighborIds = [], matches = []) {
+  // Guard: graph not yet loaded — queue for after loadGraph builds nodeById.
+  if (!nodeById.has(noteId)) {
+    pendingFocus = [noteId, neighborIds, matches];
+    return;
+  }
+
+  focusId = noteId;
+  focusSet.clear();
+  focusSet.add(noteId);
+  for (const id of neighborIds) focusSet.add(id);
+  for (const m of matches) focusSet.add(m.id);
+
+  // Also keep any node that already has an edge incident to noteId.
+  for (const e of edges) {
+    if (e.source === noteId) focusSet.add(e.target);
+    if (e.target === noteId) focusSet.add(e.source);
+  }
+
+  // Build spotEdges: matches that have no existing edge to/from noteId.
+  const existingNeighbors = new Set();
+  for (const e of edges) {
+    if (e.source === noteId) existingNeighbors.add(e.target);
+    if (e.target === noteId) existingNeighbors.add(e.source);
+  }
+  spotEdges = matches
+    .filter((m) => !existingNeighbors.has(m.id) && nodeById.has(m.id))
+    .map((m) => ({ source: noteId, target: m.id, type: "ai", weight: m.sim }));
+
+  kick(0.15);
+}
+
+// clearFocus() — remove the spotlight and restore full opacity for all nodes/edges.
+export function clearFocus() {
+  focusId = null;
+  focusSet.clear();
+  spotEdges = [];
+  redraw();
+}
 
 // --------------------------------------------------------------- interaction
 function screenToWorld(sx, sy) {

@@ -563,3 +563,174 @@ body.intra-on .preview-col {
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; }
 :root[data-theme="terminal"] ::-webkit-scrollbar-thumb { border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ============================================================
+   Mini-editor floating windows (ui/mini-editor.js)
+   z-index band: 150–199 (below auth z:200, above content)
+   ============================================================ */
+
+/* Layer that hosts all floating mini-window cards. */
+#miniLayer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none; /* pass through to page; individual windows re-enable */
+  z-index: 150;
+}
+
+/* Each floating window card. */
+.mini-window {
+  position: fixed;
+  /* z-index is set inline per-window (150–199 band) */
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .22), 0 2px 8px rgba(0, 0, 0, .14);
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  min-height: 120px;
+  overflow: hidden;
+  pointer-events: all; /* re-enable so clicks land */
+  /* Subtle entrance */
+  animation: mini-appear .12s ease-out;
+}
+
+@keyframes mini-appear {
+  from { opacity: 0; transform: scale(.96) translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+:root[data-theme="terminal"] .mini-window {
+  box-shadow: 0 0 0 1px var(--border-strong), 0 8px 28px rgba(0, 0, 0, .55);
+}
+
+/* Titlebar — the drag handle. */
+.mini-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px 5px 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+  flex: none;
+}
+
+.mini-titlebar:active { cursor: grabbing; }
+
+.mini-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--font-content);
+  color: var(--text);
+}
+
+:root[data-theme="paper"] .mini-title { font-weight: 500; }
+
+/* Action buttons in the titlebar. */
+.mini-btn {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--radius);
+  font-family: var(--font-chrome);
+  transition: color .1s, background .1s;
+}
+
+.mini-btn:hover { color: var(--text); background: var(--panel); }
+.mini-btn-close:hover { color: var(--danger); background: var(--panel); }
+.mini-btn-exp:hover   { color: var(--accent-2); }
+
+/* Scrollable body. */
+.mini-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  font-family: var(--font-content);
+  color: var(--text);
+  background: var(--bg);
+  min-height: 0;
+}
+
+:root[data-theme="terminal"] .mini-body { font-size: 12.5px; line-height: 1.6; }
+
+/* Inherit preview prose styles inside the mini body. */
+.mini-body h1, .mini-body h2, .mini-body h3 { color: var(--text); margin: .5em 0 .25em; font-weight: 600; }
+:root[data-theme="paper"] .mini-body h1,
+:root[data-theme="paper"] .mini-body h2 { font-weight: 500; }
+.mini-body a       { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--accent-2); }
+:root[data-theme="terminal"] .mini-body a { color: var(--accent-2); border-bottom-style: dashed; }
+.mini-body code    { background: var(--panel); padding: 1px 5px; border-radius: var(--radius); font-size: .9em; font-family: var(--font-mono); }
+.mini-body pre     { background: var(--panel); padding: 10px; border-radius: var(--radius); overflow-x: auto; }
+.mini-body ul      { padding-left: 18px; }
+.mini-body blockquote { border-left: 2px solid var(--border-strong); margin-left: 0; padding-left: 12px; color: var(--text-dim); }
+.mini-body img     { max-width: 100%; height: auto; border-radius: var(--radius); display: block; margin: 8px 0; }
+
+/* Placeholder / error text shown when no noteLoader is supplied or load fails. */
+.mini-placeholder {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-family: var(--font-chrome);
+  font-style: italic;
+}
+.mini-error { color: var(--danger); font-style: normal; font-family: var(--font-mono); font-size: 12px; }
+
+/* ---- Tab bar — bottom strip of minimized-window chips ---- */
+#miniTabBar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 149; /* just below the lowest mini-window */
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 5px 10px;
+  /* Only visible when chips are present — use :empty to hide the bar itself. */
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+  pointer-events: all;
+  /* Hide when empty so it doesn't block the page footer. */
+  min-height: 0;
+}
+
+#miniTabBar:empty {
+  display: none;
+}
+
+/* Minimized-window chip — reuses .chip vocabulary. */
+.mini-tab {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 4px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-content);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color .12s, background .12s;
+}
+
+.mini-tab:hover { border-color: var(--ai-link); background: var(--panel); }
+:root[data-theme="terminal"] .mini-tab { font-family: var(--font-chrome); }

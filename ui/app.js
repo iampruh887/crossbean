@@ -1,5 +1,5 @@
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm";
-import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph } from "/graph.js";
+import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph, focusNode, clearFocus } from "/graph.js";
 import { splitSentences, buildIntraGraph } from "/chunk.js";
 import { createIntraGraph } from "/intra-graph.js";
 
@@ -213,6 +213,7 @@ async function selectNote(id) {
   loadSuggestions(id);
   renderAttachments(id);
   scheduleIntraRefresh();
+  if ($("#graphView").classList.contains("active")) spotlightCurrent();
 }
 
 // Populate the editor's group picker: "No group", existing groups, "New group…".
@@ -353,6 +354,15 @@ async function loadSuggestions(id) {
   }
 }
 
+// --------------------------------------------------------- cross-vault spotlight
+async function spotlightCurrent() {
+  if (state.currentId == null) return;
+  try {
+    const hits = await api.suggestCross(state.currentId, 8);
+    focusNode(state.currentId, hits.map((h) => h.id), hits);
+  } catch (_) { /* never break selection */ }
+}
+
 // ------------------------------------------------------------------- search
 async function runSearch() {
   const q = $("#searchInput").value.trim();
@@ -386,9 +396,10 @@ function switchView(view) {
   $("#graphView").classList.toggle("active", view === "graph");
   if (view === "graph") {
     resizeGraph();
-    loadGraph(Number($("#threshold").value), openGraphNode);
+    loadGraph(Number($("#threshold").value), openGraphNode).then(spotlightCurrent);
   } else {
     stopGraph(); // don't run the physics loop while the graph is hidden
+    if (view === "editor") clearFocus();
   }
 }
 
