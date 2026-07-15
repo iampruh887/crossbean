@@ -439,30 +439,195 @@ function initSidebarSplit() {
   div.addEventListener("dblclick", () => { app.style.setProperty("--side-w", "280px"); localStorage.setItem(SIDE_KEY, "280px"); resizeGraph(); });
 }
 
-// Draggable divider between the writing pane and the preview. Ratio persists.
-const SPLIT_KEY = "cb-edit-split";
-function initEditorSplit() {
-  const wrap = document.querySelector(".editor-wrap");
-  const div = $("#editorSplit");
-  if (!wrap || !div) return;
-  const saved = localStorage.getItem(SPLIT_KEY);
-  if (saved) wrap.style.setProperty("--edit-w", saved);
-  let dragging = false;
-  const setPct = (pct) => wrap.style.setProperty("--edit-w", Math.max(15, Math.min(85, pct)).toFixed(1) + "%");
-  div.addEventListener("mousedown", (e) => {
-    e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none";
+// ---------------------------------------------------------- workspace splitter
+// Persists per-pane pixel widths (not percentages, so they survive pane
+// toggles without the editor collapsing). localStorage key: cb-pane-widths.
+const PANE_WIDTHS_KEY = "cb-pane-widths";
+
+// Ordered list of all (optional) panes that live right of the editor.
+// "editor" always fills the remainder via flex-grow.
+const WORKSPACE_PANES = ["rendered", "intra", "attach"];
+const PANE_DEFAULTS   = { rendered: 380, intra: 300, attach: 240 };
+
+function loadPaneWidths() {
+  try { return JSON.parse(localStorage.getItem(PANE_WIDTHS_KEY) || "{}"); }
+  catch (_) { return {}; }
+}
+function savePaneWidths(widths) {
+  try { localStorage.setItem(PANE_WIDTHS_KEY, JSON.stringify(widths)); }
+  catch (_) { /* non-fatal */ }
+}
+
+// Apply stored (or default) flex-basis to each optional pane element.
+function applyPaneWidths(widths) {
+  for (const key of WORKSPACE_PANES) {
+    const el = document.querySelector(`.workspace .pane[data-pane="${key}"]`);
+    if (!el) continue;
+    const w = widths[key] ?? PANE_DEFAULTS[key];
+    el.style.flexBasis = w + "px";
+    el.style.flexGrow = "0";
+    el.style.flexShrink = "0";
+  }
+}
+
+// Update splitter visibility so only splits between two VISIBLE panes show.
+function syncSplitters() {
+  const workspace = document.querySelector(".workspace");
+  if (!workspace) return;
+  const splits = [...workspace.querySelectorAll(".workspace-split")];
+  // Build an ordered list of all panes (editor + optional ones).
+  const allPanes = ["editor", ...WORKSPACE_PANES];
+  for (const sp of splits) {
+    const key = sp.dataset.split; // e.g. "editor-rendered"
+    const [a, b] = key.split("-");
+    const elA = workspace.querySelector(`.pane[data-pane="${a}"]`);
+    const elB = workspace.querySelector(`.pane[data-pane="${b}"]`);
+    const vis = elA && !elA.classList.contains("pane-hidden") &&
+                elB && !elB.classList.contains("pane-hidden");
+    sp.classList.toggle("split-hidden", !vis);
+  }
+  // After any layout change, resize the intra canvas.
+  if (_intraInstance) _intraInstance.resize();
+}
+
+function initWorkspaceSplits() {
+  const workspace = document.querySelector(".workspace");
+  if (!workspace) return;
+
+  // Restore saved widths (or use defaults).
+  const widths = loadPaneWidths();
+  applyPaneWidths(widths);
+  syncSplitters();
+
+  // Wire each splitter handle.
+  workspace.querySelectorAll(".workspace-split").forEach((div) => {
+    const key = div.dataset.split;
+    const [leftKey, rightKey] = key.split("-");
+    let dragging = false;
+    let startX, startLeftW, startRightW;
+
+    div.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const elL = workspace.querySelector(`.pane[data-pane="${leftKey}"]`);
+      const elR = workspace.querySelector(`.pane[data-pane="${rightKey}"]`);
+      if (!elL || !elR) return;
+      dragging = true;
+      startX = e.clientX;
+      startLeftW  = elL.getBoundingClientRect().width;
+      startRightW = elR.getBoundingClientRect().width;
+      div.classList.add("dragging");
+      document.body.style.userSelect = "none";
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const delta = e.clientX - startX;
+      const elL = workspace.querySelector(`.pane[data-pane="${leftKey}"]`);
+      const elR = workspace.querySelector(`.pane[data-pane="${rightKey}"]`);
+      if (!elL || !elR) return;
+      // Editor pane (leftKey="editor") has flex-grow:1; resize right only.
+      if (leftKey === "editor") {
+        const newR = Math.max(80, startRightW - delta);
+        elR.style.flexBasis = newR + "px";
+        const cur = loadPaneWidths();
+        cur[rightKey] = newR;
+        savePaneWidths(cur);
+      } else {
+        const newL = Math.max(80, startLeftW + delta);
+        const newR = Math.max(80, startRightW - delta);
+        elL.style.flexBasis = newL + "px";
+        elR.style.flexBasis = newR + "px";
+        const cur = loadPaneWidths();
+        cur[leftKey]  = newL;
+        cur[rightKey] = newR;
+        savePaneWidths(cur);
+      }
+      if (_intraInstance) _intraInstance.resize();
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      div.classList.remove("dragging");
+      document.body.style.userSelect = "";
+    });
+
+    // Double-click: reset both sides to their defaults.
+    div.addEventListener("dblclick", () => {
+      const elL = workspace.querySelector(`.pane[data-pane="${leftKey}"]`);
+      const elR = workspace.querySelector(`.pane[data-pane="${rightKey}"]`);
+      const cur = loadPaneWidths();
+      if (elR && rightKey !== "editor") {
+        elR.style.flexBasis = PANE_DEFAULTS[rightKey] + "px";
+        cur[rightKey] = PANE_DEFAULTS[rightKey];
+      }
+      if (elL && leftKey !== "editor") {
+        elL.style.flexBasis = PANE_DEFAULTS[leftKey] + "px";
+        cur[leftKey] = PANE_DEFAULTS[leftKey];
+      }
+      savePaneWidths(cur);
+      if (_intraInstance) _intraInstance.resize();
+    });
   });
-  window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    const r = wrap.getBoundingClientRect();
-    setPct(((e.clientX - r.left) / r.width) * 100);
-  });
-  window.addEventListener("mouseup", () => {
-    if (!dragging) return;
-    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
-    localStorage.setItem(SPLIT_KEY, wrap.style.getPropertyValue("--edit-w") || "50%");
-  });
-  div.addEventListener("dblclick", () => { wrap.style.setProperty("--edit-w", "50%"); localStorage.setItem(SPLIT_KEY, "50%"); });
+}
+
+// ---------------------------------------------------------- pane visibility
+// Persist which optional panes are visible. Defaults: rendered=true, intra=false, attach=false.
+const PANE_VIS_KEY = "cb-pane-vis";
+const PANE_VIS_DEFAULTS = { rendered: true, intra: false, attach: false };
+
+function loadPaneVis() {
+  try { return { ...PANE_VIS_DEFAULTS, ...JSON.parse(localStorage.getItem(PANE_VIS_KEY) || "{}") }; }
+  catch (_) { return { ...PANE_VIS_DEFAULTS }; }
+}
+function savePaneVis(vis) {
+  try { localStorage.setItem(PANE_VIS_KEY, JSON.stringify(vis)); }
+  catch (_) { /* non-fatal */ }
+}
+
+// Apply visibility to each optional pane and its toggle checkbox, then sync splitters.
+function applyPaneVis(vis) {
+  for (const key of WORKSPACE_PANES) {
+    const pane = document.querySelector(`.workspace .pane[data-pane="${key}"]`);
+    if (pane) pane.classList.toggle("pane-hidden", !vis[key]);
+  }
+  // Sync the intraToggle checkbox (the existing one drives intra pane).
+  const intraChk = $("#intraToggle");
+  if (intraChk) intraChk.checked = !!vis.intra;
+  const rendChk = $("#renderedToggle");
+  if (rendChk) rendChk.checked = !!vis.rendered;
+  const attChk = $("#attachToggle");
+  if (attChk) attChk.checked = !!vis.attach;
+  syncSplitters();
+}
+
+function setPaneVisible(key, visible) {
+  const vis = loadPaneVis();
+  vis[key] = visible;
+  savePaneVis(vis);
+  applyPaneVis(vis);
+  if (key === "intra" && visible) scheduleIntraRefresh();
+}
+
+function initPaneToggles() {
+  const vis = loadPaneVis();
+  applyPaneVis(vis);
+
+  // Rendered toggle
+  const rendChk = $("#renderedToggle");
+  if (rendChk) rendChk.onchange = () => setPaneVisible("rendered", rendChk.checked);
+
+  // Intra toggle — rewire the existing #intraToggle
+  const intraChk = $("#intraToggle");
+  if (intraChk) intraChk.onchange = () => {
+    setPaneVisible("intra", intraChk.checked);
+    // scheduleIntraRefresh already called by setPaneVisible when showing
+    if (!intraChk.checked && _intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
+  };
+
+  // Attachments toggle
+  const attChk = $("#attachToggle");
+  if (attChk) attChk.onchange = () => setPaneVisible("attach", attChk.checked);
 }
 
 // Desktop only: toggle between Local and Cloud-account mode (persist + reload).
@@ -503,13 +668,47 @@ function openMiniFromNode(node) {
 }
 
 // Called by the mini's Expand button: open the full editor, optionally scroll
-// to the match range (mirrors the intra-graph node-click pattern, ~line 682).
+// to the match range (mirrors the intra-graph node-click pattern).
 async function openMiniExpand(id, vault, matchStart, matchEnd) {
   await openGraphNode({ id, vault });
   if (matchStart != null) {
-    bodyEl.focus();
-    bodyEl.setSelectionRange(matchStart, matchEnd ?? matchStart);
+    scrollEditorToRange(matchStart, matchEnd ?? matchStart);
   }
+}
+
+// Scroll the textarea so the range [start, end] is centred in view.
+// Uses a hidden mirror element to measure the pixel Y of the offset.
+function scrollEditorToRange(start, end) {
+  bodyEl.focus();
+  bodyEl.setSelectionRange(start, end ?? start);
+  // Build a mirror of the textarea to measure the caret Y position.
+  const cs = getComputedStyle(bodyEl);
+  const mirror = document.createElement("div");
+  mirror.style.cssText = [
+    "position:fixed", "top:0", "left:-9999px", "visibility:hidden",
+    "overflow-wrap:break-word", "white-space:pre-wrap",
+    `width:${bodyEl.clientWidth}px`,
+    `font:${cs.font}`,
+    `font-size:${cs.fontSize}`,
+    `font-family:${cs.fontFamily}`,
+    `font-weight:${cs.fontWeight}`,
+    `line-height:${cs.lineHeight}`,
+    `letter-spacing:${cs.letterSpacing}`,
+    `padding:${cs.padding}`,
+    `border:${cs.border}`,
+    `box-sizing:${cs.boxSizing}`,
+    `tab-size:${cs.tabSize}`,
+  ].join(";");
+  // Text before caret + a tiny marker span.
+  const before = document.createTextNode(bodyEl.value.slice(0, start));
+  const marker = document.createElement("span");
+  marker.textContent = "​"; // zero-width space
+  mirror.appendChild(before);
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  const markerTop = marker.offsetTop;
+  document.body.removeChild(mirror);
+  bodyEl.scrollTop = Math.max(0, markerTop - bodyEl.clientHeight / 2);
 }
 
 // --------------------------------------------------------------- images
@@ -624,62 +823,27 @@ const _intraVecCache = new Map(); // note-text-key -> Map(sentenceText -> vector
 let _intraInstance = null;        // current createIntraGraph() handle
 let _intraRefreshTimer = null;
 
-const INTRA_H_KEY = "cb-intra-h";
-
-// Vertical (row-resize) splitter between #preview and #intraPane.
-function initPreviewSplit() {
-  const col = document.querySelector(".preview-col");
-  const div = $("#previewSplit");
-  if (!col || !div) return;
-  const saved = localStorage.getItem(INTRA_H_KEY);
-  if (saved) col.style.setProperty("--intra-h", saved);
-  let dragging = false;
-  div.addEventListener("mousedown", (e) => {
-    e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none";
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    const r = col.getBoundingClientRect();
-    const pct = Math.max(15, Math.min(80, ((r.bottom - e.clientY) / r.height) * 100));
-    col.style.setProperty("--intra-h", pct.toFixed(1) + "%");
-    if (_intraInstance) _intraInstance.resize();
-  });
-  window.addEventListener("mouseup", () => {
-    if (!dragging) return;
-    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
-    localStorage.setItem(INTRA_H_KEY, col.style.getPropertyValue("--intra-h") || "40%");
-  });
-  div.addEventListener("dblclick", () => {
-    col.style.setProperty("--intra-h", "40%");
-    localStorage.setItem(INTRA_H_KEY, "40%");
-    if (_intraInstance) _intraInstance.resize();
-  });
-}
 
 async function refreshIntraGraph() {
   const toggle = $("#intraToggle");
   const intraPane = $("#intraPane");
   if (!toggle || !toggle.checked || state.currentId == null) {
-    document.body.classList.remove("intra-on");
     if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
     return;
   }
 
   const text = bodyEl.value || "";
   if (!text.trim()) {
-    document.body.classList.remove("intra-on");
     if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
     return;
   }
 
   const sents = splitSentences(text);
   if (!sents.length) {
-    document.body.classList.remove("intra-on");
     return;
   }
 
-  // Show busy state and reveal the pane while embedding runs.
-  document.body.classList.add("intra-on");
+  // Show busy state while embedding runs.
   if (intraPane) intraPane.classList.add("intra-busy");
 
   // Use per-note cache keyed by (noteId, sentenceText).
@@ -711,8 +875,7 @@ async function refreshIntraGraph() {
   if (!_intraInstance && canvas) {
     _intraInstance = createIntraGraph(canvas, {
       onNodeClick: (n) => {
-        bodyEl.focus();
-        bodyEl.setSelectionRange(n.start, n.end);
+        scrollEditorToRange(n.start, n.end);
       },
     });
   }
@@ -928,13 +1091,42 @@ function wire() {
   $("#attachImgBtn").onclick = () => $("#imgFileInput").click();
   $("#imgFileInput").onchange = (e) => { handleImageFiles(e.target.files); e.target.value = ""; };
 
-  initEditorSplit();
+  initWorkspaceSplits();
+  initPaneToggles();
   initSidebarSplit();
 
   // OCR ("Scan text"): only shown when the adapter supports it (web)
   $("#ocrBtn").classList.toggle("hidden", !api.ocrAvailable);
   $("#ocrBtn").onclick = () => $("#ocrFileInput").click();
   $("#ocrFileInput").onchange = (e) => { runOcr(e.target.files); e.target.value = ""; };
+
+  // Import file as new note (txt / md / docx)
+  $("#importBtn").onclick = () => $("#importFileInput").click();
+  $("#importFileInput").onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const ext = file.name.replace(/^.*\./, "").toLowerCase();
+    const title = file.name.replace(/\.[^.]+$/, "").trim() || "Imported note";
+    setStatus(`importing ${file.name}…`, true);
+    try {
+      let body = "";
+      if (ext === "docx") {
+        const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.6.0/+esm");
+        const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+        body = result.value || "";
+      } else {
+        body = await file.text();
+      }
+      const { id } = await api.create(title, body, state.currentGroup || "");
+      setStatus("imported");
+      setTimeout(() => setStatus(""), 1500);
+      await refreshNotes(id);
+    } catch (err) {
+      console.error("[crossbean] import failed:", err);
+      setStatus("import failed: " + err.message);
+    }
+  };
 
   // Attachments
   $("#attachBtn").onclick = () => $("#attachFileInput").click();
@@ -959,9 +1151,7 @@ function wire() {
     renderAttachments(state.currentId);
   };
 
-  // Intra-note graph controls
-  initPreviewSplit();
-  $("#intraToggle").onchange = scheduleIntraRefresh;
+  // Intra-note graph controls (toggle is handled by initPaneToggles)
   $("#intraGran").oninput = scheduleIntraRefresh;
   $("#intraThreshold").oninput = (e) => {
     const val = Number(e.target.value).toFixed(2);
