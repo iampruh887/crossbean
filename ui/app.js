@@ -446,8 +446,9 @@ const PANE_WIDTHS_KEY = "cb-pane-widths";
 
 // Ordered list of all (optional) panes that live right of the editor.
 // "editor" always fills the remainder via flex-grow.
-const WORKSPACE_PANES = ["rendered", "intra", "attach"];
-const PANE_DEFAULTS   = { rendered: 380, intra: 300, attach: 240 };
+// intra and attach are now floating panels, not workspace columns.
+const WORKSPACE_PANES = ["rendered"];
+const PANE_DEFAULTS   = { rendered: 380 };
 
 function loadPaneWidths() {
   try { return JSON.parse(localStorage.getItem(PANE_WIDTHS_KEY) || "{}"); }
@@ -471,12 +472,11 @@ function applyPaneWidths(widths) {
 }
 
 // Update splitter visibility so only splits between two VISIBLE panes show.
+// (intra and attach are now floating panels, so only editor-rendered remains)
 function syncSplitters() {
   const workspace = document.querySelector(".workspace");
   if (!workspace) return;
   const splits = [...workspace.querySelectorAll(".workspace-split")];
-  // Build an ordered list of all panes (editor + optional ones).
-  const allPanes = ["editor", ...WORKSPACE_PANES];
   for (const sp of splits) {
     const key = sp.dataset.split; // e.g. "editor-rendered"
     const [a, b] = key.split("-");
@@ -486,8 +486,6 @@ function syncSplitters() {
                 elB && !elB.classList.contains("pane-hidden");
     sp.classList.toggle("split-hidden", !vis);
   }
-  // After any layout change, resize the intra canvas.
-  if (_intraInstance) _intraInstance.resize();
 }
 
 function initWorkspaceSplits() {
@@ -585,19 +583,14 @@ function savePaneVis(vis) {
   catch (_) { /* non-fatal */ }
 }
 
-// Apply visibility to each optional pane and its toggle checkbox, then sync splitters.
+// Apply visibility to each optional workspace pane and sync checkboxes.
+// Note: intra and attach are floating panels, handled separately by initFloatingPanels.
 function applyPaneVis(vis) {
-  for (const key of WORKSPACE_PANES) {
-    const pane = document.querySelector(`.workspace .pane[data-pane="${key}"]`);
-    if (pane) pane.classList.toggle("pane-hidden", !vis[key]);
-  }
-  // Sync the intraToggle checkbox (the existing one drives intra pane).
-  const intraChk = $("#intraToggle");
-  if (intraChk) intraChk.checked = !!vis.intra;
+  // Only rendered is still a workspace column.
+  const rendPane = document.querySelector('.workspace .pane[data-pane="rendered"]');
+  if (rendPane) rendPane.classList.toggle("pane-hidden", !vis.rendered);
   const rendChk = $("#renderedToggle");
   if (rendChk) rendChk.checked = !!vis.rendered;
-  const attChk = $("#attachToggle");
-  if (attChk) attChk.checked = !!vis.attach;
   syncSplitters();
 }
 
@@ -605,29 +598,202 @@ function setPaneVisible(key, visible) {
   const vis = loadPaneVis();
   vis[key] = visible;
   savePaneVis(vis);
-  applyPaneVis(vis);
-  if (key === "intra" && visible) scheduleIntraRefresh();
+  if (key === "rendered") {
+    applyPaneVis(vis);
+  }
+  // intra and attach are floating panels — their visibility is handled by initFloatingPanels.
 }
 
 function initPaneToggles() {
   const vis = loadPaneVis();
   applyPaneVis(vis);
 
-  // Rendered toggle
+  // Rendered toggle — still a workspace column
   const rendChk = $("#renderedToggle");
   if (rendChk) rendChk.onchange = () => setPaneVisible("rendered", rendChk.checked);
 
-  // Intra toggle — rewire the existing #intraToggle
-  const intraChk = $("#intraToggle");
-  if (intraChk) intraChk.onchange = () => {
-    setPaneVisible("intra", intraChk.checked);
-    // scheduleIntraRefresh already called by setPaneVisible when showing
-    if (!intraChk.checked && _intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
+  // Intra and Attachments toggles are now wired by initFloatingPanels().
+}
+
+// ---------------------------------------------------------- floating panels
+// localStorage keys for geometry persistence.
+const FLOAT_INTRA_KEY  = "cb-float-intra";
+const FLOAT_ATTACH_KEY = "cb-float-attach";
+
+// Default positions: stacked on the right side of the viewport.
+function floatDefaults(panelId) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (panelId === "floatIntra") {
+    return { x: Math.max(0, vw - 340), y: 80,  w: 320, h: 360 };
+  }
+  return { x: Math.max(0, vw - 340), y: 460, w: 320, h: 260 };
+}
+
+function loadFloatGeom(key, panelId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    if (saved && typeof saved.x === "number") return saved;
+  } catch (_) { /* ignore */ }
+  return floatDefaults(panelId);
+}
+
+function saveFloatGeom(key, el) {
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      x: parseInt(el.style.left,  10) || 0,
+      y: parseInt(el.style.top,   10) || 0,
+      w: el.offsetWidth,
+      h: el.offsetHeight,
+    }));
+  } catch (_) { /* non-fatal */ }
+}
+
+function applyFloatGeom(el, geom) {
+  const maxX = Math.max(0, window.innerWidth  - 80);
+  const maxY = Math.max(0, window.innerHeight - 40);
+  el.style.left   = Math.min(geom.x, maxX) + "px";
+  el.style.top    = Math.min(geom.y, maxY) + "px";
+  el.style.width  = geom.w + "px";
+  el.style.height = geom.h + "px";
+}
+
+// Make a floating panel draggable via its titlebar using pointer capture.
+// On drag-end, clamp to viewport and save geometry.
+function makeDraggable(panel, handle, storageKey) {
+  let startPX, startPY, startLeft, startTop;
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    startPX   = e.clientX;
+    startPY   = e.clientY;
+    startLeft = parseInt(panel.style.left, 10) || 0;
+    startTop  = parseInt(panel.style.top,  10) || 0;
+    handle.style.cursor = "grabbing";
+  });
+
+  handle.addEventListener("pointermove", (e) => {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    const dx = e.clientX - startPX;
+    const dy = e.clientY - startPY;
+    const newX = Math.max(0, Math.min(startLeft + dx, window.innerWidth  - 80));
+    const newY = Math.max(0, Math.min(startTop  + dy, window.innerHeight - 40));
+    panel.style.left = newX + "px";
+    panel.style.top  = newY + "px";
+  });
+
+  handle.addEventListener("pointerup", (e) => {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    handle.releasePointerCapture(e.pointerId);
+    handle.style.cursor = "";
+    saveFloatGeom(storageKey, panel);
+  });
+
+  handle.addEventListener("pointercancel", (e) => {
+    if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
+    handle.style.cursor = "";
+  });
+}
+
+// Wire resize-end saving via ResizeObserver.
+// The observer fires on any dimension change; we debounce to avoid excessive writes.
+function watchResize(panel, storageKey, onResize) {
+  let t = null;
+  const ro = new ResizeObserver(() => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      saveFloatGeom(storageKey, panel);
+      if (onResize) onResize();
+    }, 80);
+  });
+  ro.observe(panel);
+}
+
+function showFloatPanel(panel, storageKey) {
+  const geom = loadFloatGeom(storageKey, panel.id);
+  applyFloatGeom(panel, geom);
+  panel.hidden = false;
+}
+
+function hideFloatPanel(panel) {
+  panel.hidden = true;
+}
+
+function initFloatingPanels() {
+  const intraPanel  = $("#floatIntra");
+  const attachPanel = $("#floatAttach");
+  if (!intraPanel || !attachPanel) return;
+
+  // --- Related (intra) panel ---
+  const intraVis = loadPaneVis();
+  if (intraVis.intra) showFloatPanel(intraPanel, FLOAT_INTRA_KEY);
+
+  makeDraggable(intraPanel, $("#floatIntraDrag"), FLOAT_INTRA_KEY);
+
+  // ResizeObserver on the panel drives intraCanvas resize.
+  watchResize(intraPanel, FLOAT_INTRA_KEY, () => {
+    if (_intraInstance) _intraInstance.resize();
+  });
+
+  // Close button unchecks the toggle and hides.
+  $("#floatIntraClose").onclick = () => {
+    const chk = $("#intraToggle");
+    if (chk) chk.checked = false;
+    const vis = loadPaneVis();
+    vis.intra = false;
+    savePaneVis(vis);
+    hideFloatPanel(intraPanel);
+    if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
   };
 
-  // Attachments toggle
+  // Toolbar toggle wires to show/hide floating panel (replaces old column logic).
+  const intraChk = $("#intraToggle");
+  if (intraChk) intraChk.onchange = () => {
+    const vis = loadPaneVis();
+    vis.intra = intraChk.checked;
+    savePaneVis(vis);
+    if (intraChk.checked) {
+      showFloatPanel(intraPanel, FLOAT_INTRA_KEY);
+      scheduleIntraRefresh();
+    } else {
+      hideFloatPanel(intraPanel);
+      if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
+    }
+  };
+
+  // --- Attachments panel ---
+  const attachVis = loadPaneVis();
+  if (attachVis.attach) showFloatPanel(attachPanel, FLOAT_ATTACH_KEY);
+
+  makeDraggable(attachPanel, $("#floatAttachDrag"), FLOAT_ATTACH_KEY);
+  watchResize(attachPanel, FLOAT_ATTACH_KEY, null);
+
+  $("#floatAttachClose").onclick = () => {
+    const chk = $("#attachToggle");
+    if (chk) chk.checked = false;
+    const vis = loadPaneVis();
+    vis.attach = false;
+    savePaneVis(vis);
+    hideFloatPanel(attachPanel);
+  };
+
   const attChk = $("#attachToggle");
-  if (attChk) attChk.onchange = () => setPaneVisible("attach", attChk.checked);
+  if (attChk) attChk.onchange = () => {
+    const vis = loadPaneVis();
+    vis.attach = attChk.checked;
+    savePaneVis(vis);
+    if (attChk.checked) {
+      showFloatPanel(attachPanel, FLOAT_ATTACH_KEY);
+    } else {
+      hideFloatPanel(attachPanel);
+    }
+  };
+
+  // Sync checkbox states to persisted visibility.
+  if (intraChk)  intraChk.checked  = !!intraVis.intra;
+  if (attChk)    attChk.checked    = !!attachVis.attach;
 }
 
 // Desktop only: toggle between Local and Cloud-account mode (persist + reload).
@@ -1108,6 +1274,7 @@ function wire() {
 
   initWorkspaceSplits();
   initPaneToggles();
+  initFloatingPanels();
   initSidebarSplit();
 
   // OCR ("Scan text"): only shown when the adapter supports it (web)

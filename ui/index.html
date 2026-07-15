@@ -94,34 +94,6 @@
             <div class="pane" data-pane="rendered">
               <div id="preview" class="preview"></div>
             </div>
-            <div class="pane-split workspace-split" data-split="rendered-intra" title="Drag to resize · double-click to reset"></div>
-            <div class="pane" data-pane="intra">
-              <div id="intraPane">
-                <div class="intra-toolbar">
-                  <label class="intra-ctrl-label">
-                    Granularity
-                    <input type="range" id="intraGran" min="1" max="6" step="1" value="1" />
-                  </label>
-                  <label class="intra-ctrl-label">
-                    Threshold
-                    <input type="range" id="intraThreshold" min="0.3" max="0.85" step="0.01" value="0.55" />
-                    <span id="intraThVal">0.55</span>
-                  </label>
-                </div>
-                <canvas id="intraCanvas"></canvas>
-              </div>
-            </div>
-            <div class="pane-split workspace-split" data-split="intra-attach" title="Drag to resize · double-click to reset"></div>
-            <div class="pane" data-pane="attach">
-              <div id="attachments" class="attachments attachments-pane">
-                <div class="attach-pane-header">
-                  <span class="attach-pane-title">Attachments</span>
-                  <button id="attachBtn" class="btn bar-btn" title="Attach a file to this note">Attach</button>
-                  <input id="attachFileInput" type="file" multiple hidden />
-                </div>
-                <div id="attachList" class="attach-list"></div>
-              </div>
-            </div>
           </div>
           <div class="editor-footer">
             <div id="suggestions" class="suggestions"></div>
@@ -202,6 +174,47 @@
         <div class="modal-actions">
           <button id="starGo" class="btn primary">⭐ Star on GitHub</button>
           <button id="starLater" class="btn">Maybe later</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating panels: Related (intra-graph) and Attachments -->
+    <div id="floatIntra" class="float-panel" hidden>
+      <div class="float-drag" id="floatIntraDrag">
+        <span class="float-title">🔗 Related</span>
+        <button class="float-close" id="floatIntraClose" title="Close">✕</button>
+      </div>
+      <div class="float-body">
+        <div id="intraPane">
+          <div class="intra-toolbar">
+            <label class="intra-ctrl-label">
+              Granularity
+              <input type="range" id="intraGran" min="1" max="6" step="1" value="1" />
+            </label>
+            <label class="intra-ctrl-label">
+              Threshold
+              <input type="range" id="intraThreshold" min="0.3" max="0.85" step="0.01" value="0.55" />
+              <span id="intraThVal">0.55</span>
+            </label>
+          </div>
+          <canvas id="intraCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div id="floatAttach" class="float-panel" hidden>
+      <div class="float-drag" id="floatAttachDrag">
+        <span class="float-title">📎 Attachments</span>
+        <button class="float-close" id="floatAttachClose" title="Close">✕</button>
+      </div>
+      <div class="float-body">
+        <div id="attachments" class="attachments attachments-pane">
+          <div class="attach-pane-header">
+            <span class="attach-pane-title">Attachments</span>
+            <button id="attachBtn" class="btn bar-btn" title="Attach a file to this note">Attach</button>
+            <input id="attachFileInput" type="file" multiple hidden />
+          </div>
+          <div id="attachList" class="attach-list"></div>
         </div>
       </div>
     </div>
