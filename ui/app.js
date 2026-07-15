@@ -199,6 +199,7 @@ async function deleteNoteFlow(id, title) {
     titleEl.value = ""; bodyEl.value = ""; renderPreview(); suggestionsEl.innerHTML = "";
   }
   await api.remove(id);
+  _intraVecCache.delete(String(id)); // free the note's cached sentence vectors
   await refreshNotes();
 }
 
