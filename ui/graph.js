@@ -253,13 +253,13 @@ function draw() {
   for (const e of edges) {
     const a = nodeById.get(e.source), b = nodeById.get(e.target);
     const inFocus = !focused || (focusSet.has(e.source) && focusSet.has(e.target));
-    const baseAlpha = e.type === "user" ? 0.6 : 0.3 + Math.min(0.5, ((e.weight ?? 0.3) - 0.25));
+    const baseAlpha = e.type === "user" ? 0.85 : 0.5 + Math.min(0.4, ((e.weight ?? 0.3) - 0.25));
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.strokeStyle = e.type === "user" ? C.user : C.ai;
     ctx.globalAlpha = inFocus ? baseAlpha : baseAlpha * 0.12;
-    ctx.lineWidth = (e.type === "user" ? 1.6 : 1.0) / view.k;
+    ctx.lineWidth = (e.type === "user" ? 2.5 : 1.8) / view.k;
     ctx.stroke();
   }
 
@@ -272,8 +272,8 @@ function draw() {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = C.ai;
-      ctx.globalAlpha = 0.3 + Math.min(0.5, ((e.weight ?? 0.3) - 0.25));
-      ctx.lineWidth = 1.0 / view.k;
+      ctx.globalAlpha = 0.5 + Math.min(0.4, ((e.weight ?? 0.3) - 0.25));
+      ctx.lineWidth = 1.8 / view.k;
       ctx.setLineDash([4 / view.k, 4 / view.k]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -283,7 +283,7 @@ function draw() {
 
   // nodes — dim those outside focusSet; accent ring on focusId; hover wins last
   for (const n of nodes) {
-    const r = 4 + Math.sqrt(n.degree || 0) * 2.4; // guard: missing degree must never yield NaN (invisible node)
+    const r = 6 + Math.sqrt(n.degree || 0) * 3.4; // guard: missing degree must never yield NaN (invisible node)
     const inFocus = !focused || focusSet.has(n.id);
     const dimMul = inFocus ? 1 : 0.12;
 
@@ -409,7 +409,7 @@ function nodeAt(sx, sy) {
   const p = screenToWorld(sx, sy);
   let best = null, bestD = Infinity;
   for (const n of nodes) {
-    const r = 4 + Math.sqrt(n.degree) * 2.4 + 4;
+    const r = 6 + Math.sqrt(n.degree) * 3.4 + 4;
     const d = (n.x - p.x) ** 2 + (n.y - p.y) ** 2;
     if (d < r * r && d < bestD) { best = n; bestD = d; }
   }

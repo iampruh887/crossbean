@@ -29,6 +29,31 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
   let drag = null;     // { node, ox, oy } | null
   let dragMoved = false;
 
+  // ---- tooltip div (created as a sibling of the canvas) --------------------
+  const tooltip = document.createElement("div");
+  Object.assign(tooltip.style, {
+    position:      "absolute",
+    pointerEvents: "none",
+    zIndex:        "10",
+    maxWidth:      "220px",
+    padding:       "5px 9px",
+    borderRadius:  "4px",
+    fontSize:      "11.5px",
+    lineHeight:    "1.45",
+    whiteSpace:    "pre-wrap",
+    wordBreak:     "break-word",
+    display:       "none",
+    // Colors will be set per-frame to follow the theme.
+  });
+  // Insert relative to the canvas's parent so absolute coords align.
+  const canvasParent = canvas.parentElement;
+  if (canvasParent) {
+    // Parent must be position:relative/absolute for our absolute positioning.
+    const parentPos = getComputedStyle(canvasParent).position;
+    if (parentPos === "static") canvasParent.style.position = "relative";
+    canvasParent.appendChild(tooltip);
+  }
+
   // ---- CSS variable reader (same pattern as graph.js themeColors) -----------
   function themeColors() {
     const s = getComputedStyle(document.documentElement);
@@ -41,8 +66,19 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
       accent:  v("--accent-2"),
       aiLink:  v("--ai-link"),
       border:  v("--border"),
+      text:    v("--text"),
+      panel:   v("--panel"),
       font:    v("--g-font") || "sans-serif",
     };
+  }
+
+  // ---- per-node color derived from id (golden-angle hue distribution) ------
+  // Uses hsl() so it looks good on both themes.
+  // Lightness is fixed at 52% — vivid enough on paper (light bg) and terminal
+  // (dark bg). Saturation at 62% avoids both washed-out and garish.
+  function nodeColor(id, alpha = 1) {
+    const hue = (id * 137.508) % 360;
+    return `hsla(${hue.toFixed(1)}, 62%, 52%, ${alpha})`;
   }
 
   // ---- DPR-aware resize (mirrors resizeGraph in graph.js) ------------------
@@ -160,9 +196,11 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
   }
 
   // ---- drawing --------------------------------------------------------------
-  const NODE_R   = 18;  // base node radius (rounded rect half-height)
-  const NODE_W   = 80;  // base node width (rounded rect half-width)
-  const LABEL_MAX = 24; // max chars in truncated label
+  // Nodes are small circles — no text inside.
+  // NODE_R: base radius in CSS pixels (device-independent).
+  const NODE_R = 10; // circle radius
+  // HIT_SLOP: extra px around the circle for easier clicking/hovering.
+  const HIT_SLOP = 5;
 
   function draw() {
     const C    = themeColors();
@@ -171,70 +209,53 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
 
     ctx.clearRect(0, 0, rect.width, rect.height);
 
-    // Edges (drawn under nodes).
+    // ---- Edges (drawn under nodes) -----------------------------------------
+    // Edge color: --ai-link; opacity: at least 0.40, scaled by weight.
+    // lineWidth: 2.0 CSS px (clear and readable on any background).
     for (const e of edges) {
       const a = nodeById.get(e.source);
       const b = nodeById.get(e.target);
       if (!a || !b) continue;
+
+      const opacity = Math.min(0.90, 0.45 + e.weight * 0.5);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      // Opacity is proportional to edge weight (same convention as graph.js AI edges).
-      ctx.globalAlpha = 0.15 + Math.min(0.7, e.weight * 0.9);
+      ctx.globalAlpha = opacity;
       ctx.strokeStyle = C.aiLink;
-      ctx.lineWidth   = 1.2;
+      ctx.lineWidth   = 2.0;
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
-    // Nodes (rounded rects with truncated labels).
+    // ---- Nodes (circles with per-node hue) ----------------------------------
     for (const n of nodes) {
       const isHighlight = n.id === highlightId;
       const isHover     = n === hoverNode;
 
-      const fillColor = isHighlight ? C.accent : (isHover ? C.accent : C.node);
-      const textColor = isHighlight ? C.bg      : (isHover ? C.bg     : C.bg);
+      const fillColor   = nodeColor(n.id, 1.0);
+      const borderColor = C.border;
+      const accentColor = C.accent;
 
-      const label = n.text.trim().slice(0, LABEL_MAX).replace(/\s+/g, " ");
-      const display = label.length < n.text.trim().length ? label.slice(0, LABEL_MAX - 1) + "…" : label;
-
-      ctx.font = `12px ${C.font}`;
-      const textW = ctx.measureText(display).width;
-      const hw = Math.max(NODE_W, textW / 2 + 12); // half-width
-      const hh = NODE_R;                             // half-height
-
-      // Rounded rect.
-      const x = n.x - hw, y = n.y - hh, w = hw * 2, h = hh * 2;
-      const r = 5;
+      // Main circle fill.
       ctx.beginPath();
-      if (ctx.roundRect) {
-        ctx.roundRect(x, y, w, h, r);
-      } else {
-        // Fallback for environments without roundRect.
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.arcTo(x + w, y,     x + w, y + r,     r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-        ctx.lineTo(x + r, y + h);
-        ctx.arcTo(x,     y + h, x, y + h - r,     r);
-        ctx.lineTo(x,     y + r);
-        ctx.arcTo(x,     y,     x + r, y,          r);
-        ctx.closePath();
-      }
+      ctx.arc(n.x, n.y, NODE_R, 0, Math.PI * 2);
       ctx.fillStyle = fillColor;
       ctx.fill();
-      // Subtle stroke to help dark themes.
-      ctx.lineWidth   = isHighlight || isHover ? 2 : 1;
-      ctx.strokeStyle = isHighlight || isHover ? C.accent : C.border;
+
+      // Subtle border ring (1px, theme border color).
+      ctx.lineWidth   = 1;
+      ctx.strokeStyle = borderColor;
       ctx.stroke();
 
-      // Label.
-      ctx.fillStyle    = textColor;
-      ctx.textAlign    = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(display, n.x, n.y);
-      ctx.textBaseline = "alphabetic";
+      // Accent ring for highlighted or hovered node.
+      if (isHighlight || isHover) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, NODE_R + 3, 0, Math.PI * 2);
+        ctx.lineWidth   = isHighlight ? 2.5 : 1.5;
+        ctx.strokeStyle = accentColor;
+        ctx.stroke();
+      }
     }
   }
 
@@ -260,19 +281,56 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
     if (!raf) draw();
   }
 
+  // ---- tooltip management --------------------------------------------------
+  function showTooltip(n, mouseX, mouseY) {
+    const C = themeColors();
+    // Truncate text to ~80 chars for readability.
+    const raw  = (n.text || "").trim().replace(/\s+/g, " ");
+    const text = raw.length > 80 ? raw.slice(0, 79) + "…" : raw;
+    tooltip.textContent = text;
+
+    // Style to match current theme.
+    Object.assign(tooltip.style, {
+      background:  C.panel  || "#efebe0",
+      color:       C.text   || "#1a1812",
+      border:      `1px solid ${C.border || "#e3ded0"}`,
+      fontFamily:  C.font,
+      display:     "block",
+    });
+
+    // Position near the cursor, offset so it doesn't obscure the node.
+    // Use the canvas's bounding rect relative to the parent to convert
+    // mouse coords (already canvas-local) to parent-local coords.
+    const canvasRect  = canvas.getBoundingClientRect();
+    const parentRect  = canvasParent ? canvasParent.getBoundingClientRect() : canvasRect;
+    const localX = (canvasRect.left - parentRect.left) + mouseX + 14;
+    const localY = (canvasRect.top  - parentRect.top)  + mouseY - 8;
+
+    tooltip.style.left = localX + "px";
+    tooltip.style.top  = localY + "px";
+  }
+
+  function hideTooltip() {
+    tooltip.style.display = "none";
+  }
+
   // ---- hit-test -------------------------------------------------------------
   function nodeAt(sx, sy) {
     // Test in reverse draw order so topmost node wins.
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n  = nodes[i];
-      const hw = NODE_W + 12; // generous hit area
-      const hh = NODE_R + 4;
-      if (Math.abs(sx - n.x) <= hw && Math.abs(sy - n.y) <= hh) return n;
+      const dx = sx - n.x;
+      const dy = sy - n.y;
+      if (dx * dx + dy * dy <= (NODE_R + HIT_SLOP) * (NODE_R + HIT_SLOP)) return n;
     }
     return null;
   }
 
   // ---- interaction ----------------------------------------------------------
+  // Track last known mouse position for tooltip repositioning.
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+
   function onMouseDown(e) {
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -289,11 +347,21 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    lastMouseX = sx;
+    lastMouseY = sy;
+
     if (!drag) {
       const prev = hoverNode;
       hoverNode = nodeAt(sx, sy);
       canvas.style.cursor = hoverNode ? "pointer" : "default";
       if (hoverNode !== prev) redraw();
+
+      // Update tooltip.
+      if (hoverNode) {
+        showTooltip(hoverNode, sx, sy);
+      } else {
+        hideTooltip();
+      }
       return;
     }
     dragMoved = true;
@@ -312,17 +380,27 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
     drag = null;
   }
 
+  function onMouseLeave() {
+    hoverNode = null;
+    hideTooltip();
+    redraw();
+  }
+
   // Attach listeners to the canvas (not window, to stay scoped to this instance).
-  canvas.addEventListener("mousedown", onMouseDown);
-  canvas.addEventListener("mousemove", onMouseMove);
-  canvas.addEventListener("mouseup",   onMouseUp);
+  canvas.addEventListener("mousedown",  onMouseDown);
+  canvas.addEventListener("mousemove",  onMouseMove);
+  canvas.addEventListener("mouseup",    onMouseUp);
+  canvas.addEventListener("mouseleave", onMouseLeave);
 
   // ---- public API -----------------------------------------------------------
   function destroy() {
     if (raf) { cancelAnimationFrame(raf); raf = null; }
-    canvas.removeEventListener("mousedown", onMouseDown);
-    canvas.removeEventListener("mousemove", onMouseMove);
-    canvas.removeEventListener("mouseup",   onMouseUp);
+    canvas.removeEventListener("mousedown",  onMouseDown);
+    canvas.removeEventListener("mousemove",  onMouseMove);
+    canvas.removeEventListener("mouseup",    onMouseUp);
+    canvas.removeEventListener("mouseleave", onMouseLeave);
+    // Remove the tooltip div from the DOM.
+    if (tooltip.parentElement) tooltip.parentElement.removeChild(tooltip);
     nodes = []; edges = []; nodeById = new Map();
   }
 
