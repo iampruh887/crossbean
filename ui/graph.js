@@ -263,21 +263,23 @@ function draw() {
     ctx.stroke();
   }
 
-  // spotEdges — transient AI edges shown only while focused
+  // spotEdges — highlighter-style path from the selected note to its matches:
+  // a thick, semi-transparent, solid accent stroke with round caps (like a
+  // marker swipe), matching the focused node's accent ring. Not dotted.
   if (focused) {
+    ctx.lineCap = "round";
     for (const e of spotEdges) {
       const a = nodeById.get(e.source), b = nodeById.get(e.target);
       if (!a || !b) continue;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = C.ai;
-      ctx.globalAlpha = 0.5 + Math.min(0.4, ((e.weight ?? 0.3) - 0.25));
-      ctx.lineWidth = 1.8 / view.k;
-      ctx.setLineDash([4 / view.k, 4 / view.k]);
+      ctx.strokeStyle = C.hover;
+      ctx.globalAlpha = 0.4 + Math.min(0.3, ((e.weight ?? 0.3) - 0.25));
+      ctx.lineWidth = 7 / view.k;
       ctx.stroke();
-      ctx.setLineDash([]);
     }
+    ctx.lineCap = "butt";
   }
   ctx.globalAlpha = 1;
 
