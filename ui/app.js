@@ -477,11 +477,13 @@ function syncSplitters() {
   const splits = [...workspace.querySelectorAll(".workspace-split")];
   for (const sp of splits) {
     const key = sp.dataset.split; // e.g. "editor-rendered"
-    const [a, b] = key.split("-");
-    const elA = workspace.querySelector(`.pane[data-pane="${a}"]`);
-    const elB = workspace.querySelector(`.pane[data-pane="${b}"]`);
-    const vis = elA && !elA.classList.contains("pane-hidden") &&
-                elB && !elB.classList.contains("pane-hidden");
+    const rightKey = key.split("-")[1];
+    const elB = workspace.querySelector(`.pane[data-pane="${rightKey}"]`);
+    // A splitter resizes the pane on its RIGHT; the editor (leftmost, flex-grow)
+    // always absorbs the slack. So show it whenever its right pane is visible —
+    // regardless of a hidden left neighbour. (Requiring BOTH neighbours visible
+    // stranded a pane with no handle whenever an intermediate pane was hidden.)
+    const vis = elB && !elB.classList.contains("pane-hidden");
     sp.classList.toggle("split-hidden", !vis);
   }
   if (_intraInstance) _intraInstance.resize();
