@@ -75,19 +75,27 @@
             <input id="ocrFileInput" type="file" accept="image/*" multiple hidden />
             <button id="attachImgBtn" class="btn bar-btn" title="Attach an image (or paste / drop one)">🖼 Image</button>
             <input id="imgFileInput" type="file" accept="image/*" multiple hidden />
+            <button id="importBtn" class="btn bar-btn" title="Import a text, markdown, or Word file as a new note">⬆ Import</button>
+            <input id="importFileInput" type="file" accept=".txt,.md,.markdown,.docx" hidden />
+            <label id="renderedToggleLabel" class="btn bar-btn" title="Show live markdown preview"><input type="checkbox" id="renderedToggle" checked /> 👁 Rendered</label>
             <label id="intraToggleLabel" class="btn bar-btn" title="Show related passages within this note as a mini-graph"><input type="checkbox" id="intraToggle" /> 🔗 Related</label>
+            <label id="attachToggleLabel" class="btn bar-btn" title="Show attachments pane"><input type="checkbox" id="attachToggle" /> 📎 Attachments</label>
           </div>
-          <div class="editor-wrap">
-            <textarea
-              id="bodyInput"
-              class="body-input"
-              placeholder="Write in markdown. Link notes with [[Note Title]].&#10;&#10;Connections are found automatically from meaning — open the Graph tab."
-              spellcheck="false"
-            ></textarea>
-            <div id="editorSplit" class="pane-split" title="Drag to resize · double-click to reset"></div>
-            <div class="preview-col">
+          <div class="workspace">
+            <div class="pane" data-pane="editor">
+              <textarea
+                id="bodyInput"
+                class="body-input"
+                placeholder="Write in markdown. Link notes with [[Note Title]].&#10;&#10;Connections are found automatically from meaning — open the Graph tab."
+                spellcheck="false"
+              ></textarea>
+            </div>
+            <div class="pane-split workspace-split" data-split="editor-rendered" title="Drag to resize · double-click to reset"></div>
+            <div class="pane" data-pane="rendered">
               <div id="preview" class="preview"></div>
-              <div id="previewSplit" class="pane-split pane-split-h" title="Drag to resize · double-click to reset"></div>
+            </div>
+            <div class="pane-split workspace-split" data-split="rendered-intra" title="Drag to resize · double-click to reset"></div>
+            <div class="pane" data-pane="intra">
               <div id="intraPane">
                 <div class="intra-toolbar">
                   <label class="intra-ctrl-label">
@@ -103,14 +111,20 @@
                 <canvas id="intraCanvas"></canvas>
               </div>
             </div>
+            <div class="pane-split workspace-split" data-split="intra-attach" title="Drag to resize · double-click to reset"></div>
+            <div class="pane" data-pane="attach">
+              <div id="attachments" class="attachments attachments-pane">
+                <div class="attach-pane-header">
+                  <span class="attach-pane-title">Attachments</span>
+                  <button id="attachBtn" class="btn bar-btn" title="Attach a file to this note">Attach</button>
+                  <input id="attachFileInput" type="file" multiple hidden />
+                </div>
+                <div id="attachList" class="attach-list"></div>
+              </div>
+            </div>
           </div>
           <div class="editor-footer">
             <div id="suggestions" class="suggestions"></div>
-            <div id="attachments" class="attachments">
-              <button id="attachBtn" class="btn bar-btn" title="Attach a file to this note">Attach</button>
-              <input id="attachFileInput" type="file" multiple hidden />
-              <div id="attachList" class="attach-list"></div>
-            </div>
           </div>
         </section>
 
