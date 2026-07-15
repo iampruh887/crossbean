@@ -75,6 +75,7 @@
             <input id="ocrFileInput" type="file" accept="image/*" multiple hidden />
             <button id="attachImgBtn" class="btn bar-btn" title="Attach an image (or paste / drop one)">🖼 Image</button>
             <input id="imgFileInput" type="file" accept="image/*" multiple hidden />
+            <label id="intraToggleLabel" class="btn bar-btn" title="Show related passages within this note as a mini-graph"><input type="checkbox" id="intraToggle" /> 🔗 Related</label>
           </div>
           <div class="editor-wrap">
             <textarea
@@ -89,10 +90,6 @@
               <div id="previewSplit" class="pane-split pane-split-h" title="Drag to resize · double-click to reset"></div>
               <div id="intraPane">
                 <div class="intra-toolbar">
-                  <label class="intra-toggle-label">
-                    <input type="checkbox" id="intraToggle" />
-                    Related in this note
-                  </label>
                   <label class="intra-ctrl-label">
                     Granularity
                     <input type="range" id="intraGran" min="1" max="6" step="1" value="1" />
