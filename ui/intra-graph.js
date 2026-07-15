@@ -383,7 +383,25 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
   function onMouseLeave() {
     hoverNode = null;
     hideTooltip();
+    // If a drag was in progress, end it — otherwise `drag` stays set forever
+    // and tick() never idles (it only stops when alpha <= 0.03 && !drag),
+    // leaving the node stuck to the cursor with no button held.
+    if (drag) {
+      drag = null;
+      canvas.style.cursor = "default";
+      kick(0.2); // let the freed node settle back into the layout
+    }
     redraw();
+  }
+
+  // Catch a mouse release that happens OUTSIDE the canvas (e.g. the pointer
+  // left the canvas mid-drag). Scoped to this instance: only nulls the local
+  // `drag`, never any global state.
+  function onWindowMouseUp() {
+    if (drag) {
+      drag = null;
+      kick(0.2);
+    }
   }
 
   // Attach listeners to the canvas (not window, to stay scoped to this instance).
@@ -391,6 +409,10 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
   canvas.addEventListener("mousemove",  onMouseMove);
   canvas.addEventListener("mouseup",    onMouseUp);
   canvas.addEventListener("mouseleave", onMouseLeave);
+  // A release outside the canvas won't fire the canvas "mouseup", so also
+  // listen on window to end this instance's drag no matter where the button
+  // is released. Removed in destroy() alongside the canvas listeners.
+  window.addEventListener("mouseup",    onWindowMouseUp);
 
   // ---- public API -----------------------------------------------------------
   function destroy() {
@@ -399,6 +421,7 @@ export function createIntraGraph(canvas, { onNodeClick } = {}) {
     canvas.removeEventListener("mousemove",  onMouseMove);
     canvas.removeEventListener("mouseup",    onMouseUp);
     canvas.removeEventListener("mouseleave", onMouseLeave);
+    window.removeEventListener("mouseup",    onWindowMouseUp);
     // Remove the tooltip div from the DOM.
     if (tooltip.parentElement) tooltip.parentElement.removeChild(tooltip);
     nodes = []; edges = []; nodeById = new Map();
