@@ -52,5 +52,5 @@ self.onmessage = async (ev) => {
   }
 };
 
-// Kick off model download immediately.
-getExtractor();
+// Model loads lazily on the first "warmup"/"embed" — not on worker creation —
+// so a read-only first visit never pays the ~30MB download.

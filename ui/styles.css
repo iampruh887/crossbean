@@ -69,7 +69,11 @@ body {
   font-size: 14px;
 }
 
-#app { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+#app { display: grid; grid-template-columns: var(--side-w, 280px) 6px 1fr; height: 100vh; }
+
+/* draggable dividers between panes (sidebar|main and writing|preview) */
+.pane-split { background: var(--border); cursor: col-resize; transition: background .12s; }
+.pane-split:hover, .pane-split.dragging { background: var(--accent-2); }
 
 /* Sidebar */
 #sidebar {
@@ -196,15 +200,15 @@ body {
 .grp-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12.5px; }
 .grp-picker .bar-icon { font-size: 13px; }
 :root[data-theme="terminal"] .grp-picker .bar-icon { display: none; }
-#groupSelect {
+#groupSelect, #editorVaultSelect {
   background: transparent; color: var(--text); border: 1px solid var(--border-strong);
   border-radius: var(--radius); padding: 5px 8px; font-size: 12.5px; font-family: var(--font-chrome);
   cursor: pointer; max-width: 220px;
 }
-#groupSelect:focus { outline: none; border-color: var(--accent); }
+#groupSelect:focus, #editorVaultSelect:focus { outline: none; border-color: var(--accent); }
 #groupSelect:disabled { opacity: .5; cursor: default; }
 .bar-btn { padding: 5px 10px; font-size: 12.5px; }
-.editor-wrap { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); min-height: 0; }
+.editor-wrap { flex: 1; display: grid; grid-template-columns: var(--edit-w, 50%) 6px minmax(0, 1fr); background: var(--border); min-height: 0; }
 .editor-wrap > * { min-height: 0; } /* let grid children scroll instead of growing the page */
 .body-input {
   background: var(--bg); border: none; resize: none; color: var(--text);
@@ -277,8 +281,11 @@ body {
 .hidden { display: none !important; }
 
 /* Platform gating: /config.js sets body[data-platform] */
-body[data-platform="desktop"] .web-only { display: none !important; }
-body[data-platform="web"] .desktop-only { display: none !important; }
+/* Mode gating: body[data-mode] = local | cloud (set at boot by the adapter). */
+body[data-mode="local"] .cloud-only { display: none !important; }
+body[data-mode="cloud"] .local-only { display: none !important; }
+/* The Local↔Cloud switcher only makes sense on the desktop build. */
+body[data-platform="web"] .desktop-plat-only { display: none !important; }
 
 /* Vault switcher (web) */
 .vault-row { display: flex; gap: 6px; padding: 0 16px 10px; }
@@ -363,6 +370,194 @@ body[data-platform="web"] .desktop-only { display: none !important; }
   font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
   white-space: pre-wrap; word-break: break-word;
 }
+
+/* Preview column: stacks #preview / horizontal resizer / #intraPane vertically */
+.preview-col {
+  display: grid;
+  grid-template-rows: 1fr 0 0;
+  min-height: 0;
+  overflow: hidden;
+}
+body.intra-on .preview-col {
+  grid-template-rows: 1fr 6px var(--intra-h, 40%);
+}
+
+/* Horizontal (row-resize) pane splitter */
+.pane-split-h {
+  cursor: row-resize;
+  height: 6px;
+  width: auto;
+}
+
+/* Intra-note pane */
+#intraPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+}
+
+.intra-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 14px;
+  flex: none;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.intra-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+}
+.intra-ctrl-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.intra-ctrl-label input[type=range] {
+  accent-color: var(--accent-2);
+  width: 72px;
+}
+#intraThVal {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-2);
+  min-width: 30px;
+}
+#intraCanvas {
+  width: 100%;
+  flex: 1;
+  display: block;
+  min-height: 140px;
+  cursor: default;
+  background: var(--g-bg);
+}
+/* "computing…" busy overlay on the canvas wrapper */
+#intraPane.intra-busy::after {
+  content: "computing…";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  pointer-events: none;
+}
+#intraPane { position: relative; }
+
+/* Attachments section */
+.attachments {
+  padding: 6px 28px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+}
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+.attach-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text);
+  max-width: 220px;
+}
+.attach-item img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  flex: none;
+}
+.attach-item a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-strong);
+}
+.attach-item a:hover { border-bottom-color: var(--accent-2); color: var(--accent-2); }
+.attach-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 3px;
+  border-radius: var(--radius);
+  line-height: 1;
+}
+.attach-remove:hover { color: var(--danger); background: var(--panel-2); }
+.attach-item.uploading {
+  opacity: .6;
+  border-style: dashed;
+}
+.attach-item.uploading::before {
+  content: "↑";
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+/* Broken-image placeholder (replaces <img> on onerror) */
+.img-broken {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  vertical-align: middle;
+  margin: 2px 0;
+}
+.img-broken::before { content: "⚠"; font-size: 11px; }
+
+/* Uploading state on image insert (inline note in preview) */
+.img-uploading {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--panel);
+  border-radius: var(--radius);
+  color: var(--accent-2);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  animation: blink-dim .9s ease-in-out infinite;
+}
+@keyframes blink-dim { 0%,100%{opacity:1} 50%{opacity:.45} }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; }

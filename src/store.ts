@@ -55,6 +55,15 @@ export function initStore(path = dbPath): { vecEnabled: boolean } {
       dim     INTEGER NOT NULL,
       data    BLOB NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS attachments (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      note_id  INTEGER NOT NULL,
+      url      TEXT NOT NULL,
+      name     TEXT NOT NULL,
+      mime     TEXT NOT NULL,
+      added_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS attachments_note_id_idx ON attachments (note_id);
   `);
 
   // Migration: notes.grp holds the (implicit) group/folder name. Guarded so it
@@ -146,6 +155,7 @@ export function updateNote(id: number, title: string, body: string, grp?: unknow
 }
 
 export function deleteNote(id: number): void {
+  db.query("DELETE FROM attachments WHERE note_id = ?").run(id);
   db.query("DELETE FROM notes WHERE id = ?").run(id);
   db.query("DELETE FROM links WHERE src = ? OR dst = ?").run(id, id);
   db.query("DELETE FROM embeddings WHERE note_id = ?").run(id);
@@ -261,4 +271,34 @@ export function embeddedIds(): number[] {
 export function getEmbedding(noteId: number): Float32Array | null {
   const r = db.query("SELECT data FROM embeddings WHERE note_id = ?").get(noteId) as any;
   return r ? readVec(r.data) : null;
+}
+
+// --- attachments ----------------------------------------------------------
+
+export interface Attachment {
+  id: number;
+  note_id: number;
+  url: string;
+  name: string;
+  mime: string;
+  added_at: number;
+}
+
+export function listAttachments(noteId: number): Attachment[] {
+  return db
+    .query("SELECT id, note_id, url, name, mime, added_at FROM attachments WHERE note_id = ? ORDER BY added_at")
+    .all(noteId) as Attachment[];
+}
+
+export function addAttachment(noteId: number, fields: { url: string; name: string; mime: string }): { id: number } {
+  const now = Date.now();
+  const info = db
+    .query("INSERT INTO attachments(note_id, url, name, mime, added_at) VALUES (?, ?, ?, ?, ?)")
+    .run(noteId, fields.url, fields.name, fields.mime, now);
+  return { id: Number(info.lastInsertRowid) };
+}
+
+export function removeAttachment(id: number): { ok: true } {
+  db.query("DELETE FROM attachments WHERE id = ?").run(id);
+  return { ok: true };
 }

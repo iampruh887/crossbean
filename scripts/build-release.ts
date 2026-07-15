@@ -22,8 +22,20 @@ console.log(`building ${outDir} ...`);
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-// 1. compile — the server worker must be a second entrypoint so it's bundled
-await $`bun build --compile ./main.ts ./src/server-worker.ts --outfile ${join(outDir, binName)}`;
+// 1. compile — the server worker must be a second entrypoint so it's bundled.
+// Optionally bake the (public) Supabase/Clerk keys so the shipped binary can
+// offer cloud-account mode. Absent → the build is local-only.
+const defines: string[] = [];
+const su = process.env.SUPABASE_URL;
+const sk = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+const ck = process.env.CLERK_PUBLISHABLE_KEY;
+if (su && sk && ck) {
+  defines.push("--define", `process.env.SUPABASE_URL=${JSON.stringify(su)}`);
+  defines.push("--define", `process.env.SUPABASE_PUBLISHABLE_KEY=${JSON.stringify(sk)}`);
+  defines.push("--define", `process.env.CLERK_PUBLISHABLE_KEY=${JSON.stringify(ck)}`);
+  console.log("baking cloud-account keys into the build");
+}
+await $`bun build --compile ./main.ts ./src/server-worker.ts ${defines} --outfile ${join(outDir, binName)}`;
 
 // 2. frontend assets
 cpSync("ui", join(outDir, "ui"), { recursive: true });

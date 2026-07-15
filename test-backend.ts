@@ -8,6 +8,11 @@ const scratch = join(tmpdir(), `crossbean-test-${process.pid}`);
 rmSync(scratch, { recursive: true, force: true });
 mkdirSync(scratch, { recursive: true });
 process.env.CROSSBEAN_DATA_DIR = scratch;
+// simulate a local-only build (no cloud keys) so /config.js is deterministic
+delete process.env.SUPABASE_URL;
+delete process.env.SUPABASE_PUBLISHABLE_KEY;
+delete process.env.SUPABASE_ANON_KEY;
+delete process.env.CLERK_PUBLISHABLE_KEY;
 
 // dynamic imports so the env var above is set before paths.ts reads it
 const { startServer } = await import("./src/server");
@@ -129,6 +134,54 @@ ok(badUp.status === 415, "non-image upload rejected (415)");
 const traversal = await fetch(base + "/files/..%2F..%2Fcrossbean.db");
 ok(traversal.status === 400 || traversal.status === 404, "path traversal on /files/ blocked");
 
+// --- attachments API ------------------------------------------------------
+// (1) create a note to attach to
+const attNote = await post("/api/notes", { title: "AttachTest", body: "for attachments" });
+ok(!!attNote.id, `attachment test note created (id=${attNote.id})`);
+
+// (2) upload a tiny png to get a /files/ url
+const attUp = await fetch(base + "/api/upload", {
+  method: "POST",
+  headers: { "content-type": "image/png" },
+  body: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+}).then(j);
+ok(typeof attUp.url === "string" && attUp.url.startsWith("/files/"), "attachment upload returns /files/ url");
+
+// (3) POST /api/notes/{id}/attachments and assert it returns an id
+const att = await post(`/api/notes/${attNote.id}/attachments`, {
+  url: attUp.url,
+  name: "x.png",
+  mime: "image/png",
+});
+ok(typeof att.id === "number", `POST /api/notes/${attNote.id}/attachments returns an id (got ${att.id})`);
+
+// (4) GET /api/notes/{id}/attachments and assert the list includes that attachment
+const attList = await get(`/api/notes/${attNote.id}/attachments`);
+ok(Array.isArray(attList) && attList.some((a: any) => a.id === att.id && a.name === "x.png" && a.mime === "image/png"),
+  "GET /api/notes/{id}/attachments includes the uploaded attachment");
+
+// (5) DELETE /api/attachments/{id} and assert {ok:true}
+const attDel = await fetch(`${base}/api/attachments/${att.id}`, { method: "DELETE" }).then(j);
+ok(attDel.ok === true, `DELETE /api/attachments/${att.id} returns {ok:true}`);
+
+// (6) GET again and assert it is gone
+const attList2 = await get(`/api/notes/${attNote.id}/attachments`);
+ok(Array.isArray(attList2) && !attList2.some((a: any) => a.id === att.id),
+  "attachment is gone after DELETE /api/attachments/{id}");
+
+// (7) CASCADE: create a note + an attachment, DELETE the note, assert attachments are gone
+const cascNote = await post("/api/notes", { title: "CascadeTest", body: "will be deleted" });
+const cascAtt = await post(`/api/notes/${cascNote.id}/attachments`, {
+  url: attUp.url,
+  name: "cascade.png",
+  mime: "image/png",
+});
+ok(typeof cascAtt.id === "number", `cascade attachment created (id=${cascAtt.id})`);
+await fetch(`${base}/api/notes/${cascNote.id}`, { method: "DELETE" });
+const cascAttList = await get(`/api/notes/${cascNote.id}/attachments`);
+ok(Array.isArray(cascAttList) && cascAttList.length === 0,
+  "attachments are empty after note is deleted (cascade)");
+
 // --- migration idempotency ------------------------------------------------
 const { initStore } = await import("./src/store");
 let migOk = true;
@@ -155,7 +208,8 @@ ok(ver.version === APP_VERSION && typeof ver.repo === "string", "/api/version re
 
 // the shared UI reads /config.js before boot to pick its API adapter
 const cfg = await fetch(base + "/config.js").then((r) => r.text());
-ok(cfg.includes('platform: "desktop"'), "/config.js declares the desktop platform");
+ok(/"platform"\s*:\s*"desktop"/.test(cfg), "/config.js declares the desktop platform");
+ok(/"cloud"\s*:\s*null/.test(cfg), "/config.js has cloud=null when no keys are set");
 
 // stable-port behavior: the first server holds the default port (or PORT env);
 // a second instance must fall back to a different port and still serve.

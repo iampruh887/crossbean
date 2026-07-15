@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>crossbean</title>
+    <!-- all CDN deps (marked, Transformers.js, supabase-js, Clerk) load from jsDelivr -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -19,7 +22,7 @@
         </div>
 
         <!-- Vault switcher (web only; desktop is single-vault) -->
-        <div class="vault-row web-only">
+        <div class="vault-row cloud-only">
           <select id="vaultSelect" title="Switch vault"></select>
           <button id="shareVaultBtn" class="btn icon-btn" title="Share this vault">⇗</button>
         </div>
@@ -36,11 +39,14 @@
         <div id="noteList" class="note-list"></div>
 
         <div class="side-footer">
-          <span id="appVersion" class="app-version"></span>
-          <button id="checkUpdateBtn" class="link-btn desktop-only" title="Check GitHub for a newer version">Check for updates</button>
-          <button id="signOutBtn" class="link-btn web-only" title="Sign out of your account">Sign out</button>
+          <span id="appVersion" class="app-version local-only"></span>
+          <button id="checkUpdateBtn" class="link-btn local-only" title="Check GitHub for a newer version">Check for updates</button>
+          <button id="modeToggle" class="link-btn desktop-plat-only" title="Switch between local notes and your cloud account"></button>
+          <button id="signOutBtn" class="link-btn cloud-only" title="Sign out and return to local notes">Sign out</button>
         </div>
       </aside>
+
+      <div id="sidebarSplit" class="pane-split" title="Drag to resize · double-click to reset"></div>
 
       <!-- Main -->
       <main id="main">
@@ -56,13 +62,17 @@
         <section id="editorView" class="view active">
           <input id="titleInput" class="title-input" placeholder="Untitled" />
           <div class="editor-bar">
+            <label class="grp-picker cloud-only" title="Active vault">
+              <span class="bar-icon">🗄️</span>
+              <select id="editorVaultSelect"></select>
+            </label>
             <label class="grp-picker" title="Group this note">
               <span class="bar-icon">🗂</span>
               <select id="groupSelect"></select>
             </label>
             <div class="bar-spacer"></div>
             <button id="ocrBtn" class="btn bar-btn hidden" title="Extract text from a photo of handwriting or print">✍️ Scan text</button>
-            <input id="ocrFileInput" type="file" accept="image/*" hidden />
+            <input id="ocrFileInput" type="file" accept="image/*" multiple hidden />
             <button id="attachImgBtn" class="btn bar-btn" title="Attach an image (or paste / drop one)">🖼 Image</button>
             <input id="imgFileInput" type="file" accept="image/*" multiple hidden />
           </div>
@@ -73,10 +83,37 @@
               placeholder="Write in markdown. Link notes with [[Note Title]].&#10;&#10;Connections are found automatically from meaning — open the Graph tab."
               spellcheck="false"
             ></textarea>
-            <div id="preview" class="preview"></div>
+            <div id="editorSplit" class="pane-split" title="Drag to resize · double-click to reset"></div>
+            <div class="preview-col">
+              <div id="preview" class="preview"></div>
+              <div id="previewSplit" class="pane-split pane-split-h" title="Drag to resize · double-click to reset"></div>
+              <div id="intraPane">
+                <div class="intra-toolbar">
+                  <label class="intra-toggle-label">
+                    <input type="checkbox" id="intraToggle" />
+                    Related in this note
+                  </label>
+                  <label class="intra-ctrl-label">
+                    Granularity
+                    <input type="range" id="intraGran" min="1" max="6" step="1" value="1" />
+                  </label>
+                  <label class="intra-ctrl-label">
+                    Threshold
+                    <input type="range" id="intraThreshold" min="0.3" max="0.85" step="0.01" value="0.55" />
+                    <span id="intraThVal">0.55</span>
+                  </label>
+                </div>
+                <canvas id="intraCanvas"></canvas>
+              </div>
+            </div>
           </div>
           <div class="editor-footer">
             <div id="suggestions" class="suggestions"></div>
+            <div id="attachments" class="attachments">
+              <button id="attachBtn" class="btn bar-btn" title="Attach a file to this note">Attach</button>
+              <input id="attachFileInput" type="file" multiple hidden />
+              <div id="attachList" class="attach-list"></div>
+            </div>
           </div>
         </section>
 

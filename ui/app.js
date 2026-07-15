@@ -1,13 +1,30 @@
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm";
-import { initGraph, loadGraph, resizeGraph, setGraphSource } from "/graph.js";
+import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph } from "/graph.js";
+import { splitSentences, buildIntraGraph } from "/chunk.js";
+import { createIntraGraph } from "/intra-graph.js";
 
 // ---------------------------------------------------------------- API client
-// The adapter is chosen by /config.js: local HTTP engine on desktop,
-// Supabase on web. Same interface either way — assigned during boot().
+// The adapter is chosen at boot: the local HTTP engine (mode "local") or
+// Supabase (mode "cloud"). Web is always cloud; desktop remembers the user's
+// choice (default local) and can enter cloud mode only if the (public) keys
+// were provided via /config.js. Same adapter interface either way.
 const CONFIG = window.CB_CONFIG || { platform: "desktop" };
+const MODE_KEY = "cb-mode";
+const cloudCreds = CONFIG.platform === "web"
+  ? (CONFIG.supabaseUrl ? { supabaseUrl: CONFIG.supabaseUrl, supabaseKey: CONFIG.supabaseKey, clerkPublishableKey: CONFIG.clerkPublishableKey } : null)
+  : (CONFIG.cloud || null);
+function currentMode() {
+  if (CONFIG.platform === "web") return "cloud";
+  if (!cloudCreds) return "local";
+  return localStorage.getItem(MODE_KEY) === "cloud" ? "cloud" : "local";
+}
 let api;
-async function loadApi() {
-  const mod = await import(CONFIG.platform === "web" ? "/api-supabase.js" : "/api-local.js");
+async function loadApi(mode) {
+  if (mode === "cloud") {
+    const mod = await import("/api-supabase.js");
+    return mod.createApi({ platform: "web", ...cloudCreds });
+  }
+  const mod = await import("/api-local.js");
   return mod.createApi(CONFIG);
 }
 
@@ -23,7 +40,7 @@ function initEmbedder() {
     else if (m.type === "vector") { pending.get(m.id)?.resolve(m.vector); pending.delete(m.id); }
     else if (m.type === "error") { pending.get(m.id)?.reject(new Error(m.error)); pending.delete(m.id); setStatus("embed error: " + m.error); }
   };
-  worker.postMessage({ type: "warmup" });
+  // no eager warmup — the model downloads on the first embed (lazy, off the boot path)
 }
 function embed(text) {
   return new Promise((resolve, reject) => {
@@ -75,9 +92,17 @@ function fatalError(err) {
     banner.className = "boot-error";
     document.body.appendChild(banner);
   }
-  banner.innerHTML = `<b>Couldn't reach the backend.</b> <span class="be-msg"></span><button class="be-x" title="dismiss">✕</button>`;
+  // In cloud mode on desktop, offer a one-click drop back to offline Local mode.
+  const canFallback = CONFIG.platform === "desktop" && document.body.dataset.mode === "cloud";
+  banner.innerHTML = `<b>Couldn't reach the backend.</b> <span class="be-msg"></span>` +
+    (canFallback ? `<button class="be-local">Use Local mode</button>` : "") +
+    `<button class="be-x" title="dismiss">✕</button>`;
   banner.querySelector(".be-msg").textContent = msg;
   banner.querySelector(".be-x").onclick = () => banner.remove();
+  banner.querySelector(".be-local")?.addEventListener("click", () => {
+    localStorage.setItem(MODE_KEY, "local");
+    location.reload();
+  });
 }
 
 // --------------------------------------------------------------- note list UI
@@ -186,6 +211,8 @@ async function selectNote(id) {
   renderPreview();
   renderNoteList();
   loadSuggestions(id);
+  renderAttachments(id);
+  scheduleIntraRefresh();
 }
 
 // Populate the editor's group picker: "No group", existing groups, "New group…".
@@ -229,6 +256,26 @@ function renderPreview() {
       if (target) selectNote(target.id);
     };
   });
+  // Post-process images: lazy load, ensure alt, broken-image placeholder.
+  previewEl.querySelectorAll("img").forEach((img) => {
+    img.loading = "lazy";
+    if (!img.alt) img.alt = "image";
+    img.onerror = () => {
+      try {
+        const span = document.createElement("span");
+        span.className = "img-broken";
+        span.textContent = img.alt || "image unavailable";
+        img.parentNode?.replaceChild(span, img);
+      } catch (_) { /* never throw */ }
+    };
+  });
+}
+
+// Debounced markdown render — avoids re-parsing the whole body on every keystroke.
+let previewTimer = null;
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(renderPreview, 140);
 }
 
 function scheduleSave() {
@@ -266,11 +313,16 @@ async function indexMissing() {
   }
 }
 
+// Remember the last text embedded per note, so saves that don't change the
+// content (e.g. a group change) don't trigger a redundant embed round-trip.
+const lastEmbedded = new Map();
 async function reindex(id, text) {
+  if (lastEmbedded.get(id) === text) return; // unchanged since last embed
   try {
     setStatus("indexing…", true);
     const vector = await embed(text);
     await api.storeEmbed(id, vector);
+    lastEmbedded.set(id, text);
     setStatus("indexed");
     setTimeout(() => setStatus(""), 1200);
     const n = state.notes.find((x) => x.id === id);
@@ -334,8 +386,86 @@ function switchView(view) {
   $("#graphView").classList.toggle("active", view === "graph");
   if (view === "graph") {
     resizeGraph();
-    loadGraph(Number($("#threshold").value), (id) => { switchView("editor"); selectNote(id); });
+    loadGraph(Number($("#threshold").value), openGraphNode);
+  } else {
+    stopGraph(); // don't run the physics loop while the graph is hidden
   }
+}
+
+// Draggable divider to resize the left note-list pane. Width persists.
+const SIDE_KEY = "cb-side-w";
+function initSidebarSplit() {
+  const app = $("#app");
+  const div = $("#sidebarSplit");
+  if (!app || !div) return;
+  localStorage.removeItem("cb-sidebar-collapsed"); // clear the old collapse flag
+  const saved = localStorage.getItem(SIDE_KEY);
+  if (saved) app.style.setProperty("--side-w", saved);
+  let dragging = false;
+  div.addEventListener("mousedown", (e) => { e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none"; });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const w = Math.max(180, Math.min(520, e.clientX)); // clamp so it can't disappear
+    app.style.setProperty("--side-w", w + "px");
+    resizeGraph();
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
+    localStorage.setItem(SIDE_KEY, app.style.getPropertyValue("--side-w") || "280px");
+  });
+  div.addEventListener("dblclick", () => { app.style.setProperty("--side-w", "280px"); localStorage.setItem(SIDE_KEY, "280px"); resizeGraph(); });
+}
+
+// Draggable divider between the writing pane and the preview. Ratio persists.
+const SPLIT_KEY = "cb-edit-split";
+function initEditorSplit() {
+  const wrap = document.querySelector(".editor-wrap");
+  const div = $("#editorSplit");
+  if (!wrap || !div) return;
+  const saved = localStorage.getItem(SPLIT_KEY);
+  if (saved) wrap.style.setProperty("--edit-w", saved);
+  let dragging = false;
+  const setPct = (pct) => wrap.style.setProperty("--edit-w", Math.max(15, Math.min(85, pct)).toFixed(1) + "%");
+  div.addEventListener("mousedown", (e) => {
+    e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none";
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const r = wrap.getBoundingClientRect();
+    setPct(((e.clientX - r.left) / r.width) * 100);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
+    localStorage.setItem(SPLIT_KEY, wrap.style.getPropertyValue("--edit-w") || "50%");
+  });
+  div.addEventListener("dblclick", () => { wrap.style.setProperty("--edit-w", "50%"); localStorage.setItem(SPLIT_KEY, "50%"); });
+}
+
+// Desktop only: toggle between Local and Cloud-account mode (persist + reload).
+function initModeToggle() {
+  const btn = $("#modeToggle");
+  if (!btn) return;
+  if (CONFIG.platform !== "desktop" || !cloudCreds) { btn.classList.add("hidden"); return; }
+  const cloud = document.body.dataset.mode === "cloud";
+  btn.textContent = cloud ? "Use local notes" : "☁ Sign in to cloud";
+  btn.onclick = () => {
+    localStorage.setItem(MODE_KEY, cloud ? "local" : "cloud");
+    location.reload();
+  };
+}
+
+// Open a graph node in the editor. On the web multi-vault graph a node may live
+// in another vault — switch to it first, then open the note.
+async function openGraphNode(node) {
+  const id = typeof node === "object" ? node.id : node;
+  const vid = typeof node === "object" ? node.vault : null;
+  if (vid && api.currentVault?.() && vid !== api.currentVault()) {
+    await switchVault(vid);
+  }
+  switchView("editor");
+  selectNote(id);
 }
 
 // --------------------------------------------------------------- images
@@ -355,33 +485,202 @@ async function handleImageFiles(files) {
   const imgs = [...files].filter((f) => f.type.startsWith("image/"));
   if (!imgs.length || state.currentId == null) return;
   for (const f of imgs) {
+    const alt = (f.name || "image").replace(/\.[a-z0-9]+$/i, "").replace(/[\[\]]/g, "");
+    // Insert a temporary uploading placeholder so the user sees progress.
+    const placeholder = `\n![${alt}](uploading…)\n`;
+    insertAtCursor(placeholder);
     try {
-      setStatus("uploading image…", true);
+      setStatus(`uploading ${f.name}…`, true);
       const url = await api.upload(f);
-      const alt = (f.name || "image").replace(/\.[a-z0-9]+$/i, "").replace(/[\[\]]/g, "");
-      insertAtCursor(`\n![${alt}](${url})\n`);
+      // Replace the placeholder with the real URL in-place.
+      bodyEl.value = bodyEl.value.replace(placeholder, `\n![${alt}](${url})\n`);
+      renderPreview();
+      scheduleSave();
       setStatus("image added");
       setTimeout(() => setStatus(""), 1200);
     } catch (e) {
+      // Remove the placeholder and surface the error; continue with remaining files.
+      bodyEl.value = bodyEl.value.replace(placeholder, "");
+      renderPreview();
+      scheduleSave();
+      console.error("[crossbean] image upload failed:", e);
       setStatus("image upload failed: " + e.message);
     }
   }
 }
 
-// Scan a photo of handwriting/print → text, inserted at the cursor.
-async function runOcr(file) {
-  if (!file || !file.type.startsWith("image/") || state.currentId == null) return;
+// Scan one or more photos of handwriting/print → text, inserted at the cursor.
+// Files are processed sequentially; an in-flight guard prevents overlapping runs.
+let _ocrInFlight = false;
+async function runOcr(filesOrFile) {
+  if (state.currentId == null) return;
+  if (_ocrInFlight) { setStatus("scan already in progress…"); return; }
+  const files = [...(filesOrFile instanceof FileList ? filesOrFile : [filesOrFile])]
+    .filter((f) => f && f.type.startsWith("image/"));
+  if (!files.length) return;
+  _ocrInFlight = true;
   try {
-    setStatus("scanning text… (can take a few seconds)", true);
-    const text = (await api.ocr(file)).trim();
-    if (!text) { setStatus("no text found"); setTimeout(() => setStatus(""), 1500); return; }
-    const lead = bodyEl.value && !bodyEl.value.endsWith("\n") ? "\n\n" : "";
-    insertAtCursor(lead + text + "\n");
-    setStatus("text extracted");
-    setTimeout(() => setStatus(""), 1500);
-  } catch (e) {
-    setStatus("scan failed: " + e.message);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const prefix = files.length > 1 ? `[${i + 1}/${files.length}] ` : "";
+      setStatus(`${prefix}scanning ${f.name}…`, true);
+      // (1) Upload the scanned image so it also lands in Attachments.
+      try {
+        const url = await api.upload(f);
+        await api.addAttachment(state.currentId, { url, name: f.name, mime: f.type });
+      } catch (uploadErr) {
+        console.error("[crossbean] OCR attachment upload failed:", uploadErr);
+        // Non-fatal: continue to OCR anyway.
+      }
+      // (2) Extract text and insert at cursor.
+      try {
+        const text = (await api.ocr(f)).trim();
+        if (!text) { setStatus(`${prefix}no text found`); setTimeout(() => setStatus(""), 1500); continue; }
+        const lead = i === 0 && bodyEl.value && !bodyEl.value.endsWith("\n") ? "\n\n" : (i > 0 ? "\n\n" : "");
+        insertAtCursor(lead + text + "\n");
+        setStatus(`${prefix}text extracted`);
+        if (i === files.length - 1) setTimeout(() => setStatus(""), 1500);
+      } catch (e) {
+        setStatus(`${prefix}scan failed: ` + e.message);
+      }
+    }
+  } finally {
+    _ocrInFlight = false;
+    renderAttachments(state.currentId);
   }
+}
+
+// ----------------------------------------------------------------- attachments
+async function renderAttachments(noteId) {
+  const listEl = $("#attachList");
+  const btn = $("#attachBtn");
+  if (!listEl || noteId == null) { if (listEl) listEl.innerHTML = ""; return; }
+  let items = [];
+  try { items = await api.listAttachments(noteId); } catch (_) { /* non-fatal */ }
+  listEl.innerHTML = "";
+  for (const att of items) {
+    const el = document.createElement("div");
+    el.className = "attach-item";
+    const isImg = att.mime && att.mime.startsWith("image/");
+    el.innerHTML = (isImg ? `<img src="${escapeHtml(att.url)}" alt="${escapeHtml(att.name)}" />` : "") +
+      `<a href="${escapeHtml(att.url)}" target="_blank" rel="noopener" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</a>` +
+      `<button class="attach-remove" title="Remove attachment">✕</button>`;
+    el.querySelector(".attach-remove").onclick = async () => {
+      try { await api.removeAttachment(att.id); } catch (e) { setStatus("remove failed: " + e.message); }
+      renderAttachments(noteId);
+    };
+    listEl.appendChild(el);
+  }
+  if (btn) btn.disabled = false;
+}
+
+// --------------------------------------------------------------- intra-graph
+// Per-note sentence → vector cache (avoids re-embedding on slider changes).
+const _intraVecCache = new Map(); // note-text-key -> Map(sentenceText -> vector)
+let _intraInstance = null;        // current createIntraGraph() handle
+let _intraRefreshTimer = null;
+
+const INTRA_H_KEY = "cb-intra-h";
+
+// Vertical (row-resize) splitter between #preview and #intraPane.
+function initPreviewSplit() {
+  const col = document.querySelector(".preview-col");
+  const div = $("#previewSplit");
+  if (!col || !div) return;
+  const saved = localStorage.getItem(INTRA_H_KEY);
+  if (saved) col.style.setProperty("--intra-h", saved);
+  let dragging = false;
+  div.addEventListener("mousedown", (e) => {
+    e.preventDefault(); dragging = true; div.classList.add("dragging"); document.body.style.userSelect = "none";
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const r = col.getBoundingClientRect();
+    const pct = Math.max(15, Math.min(80, ((r.bottom - e.clientY) / r.height) * 100));
+    col.style.setProperty("--intra-h", pct.toFixed(1) + "%");
+    if (_intraInstance) _intraInstance.resize();
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; div.classList.remove("dragging"); document.body.style.userSelect = "";
+    localStorage.setItem(INTRA_H_KEY, col.style.getPropertyValue("--intra-h") || "40%");
+  });
+  div.addEventListener("dblclick", () => {
+    col.style.setProperty("--intra-h", "40%");
+    localStorage.setItem(INTRA_H_KEY, "40%");
+    if (_intraInstance) _intraInstance.resize();
+  });
+}
+
+async function refreshIntraGraph() {
+  const toggle = $("#intraToggle");
+  const intraPane = $("#intraPane");
+  if (!toggle || !toggle.checked || state.currentId == null) {
+    document.body.classList.remove("intra-on");
+    if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
+    return;
+  }
+
+  const text = bodyEl.value || "";
+  if (!text.trim()) {
+    document.body.classList.remove("intra-on");
+    if (_intraInstance) { _intraInstance.destroy(); _intraInstance = null; }
+    return;
+  }
+
+  const sents = splitSentences(text);
+  if (!sents.length) {
+    document.body.classList.remove("intra-on");
+    return;
+  }
+
+  // Show busy state and reveal the pane while embedding runs.
+  document.body.classList.add("intra-on");
+  if (intraPane) intraPane.classList.add("intra-busy");
+
+  // Use per-note cache keyed by (noteId, sentenceText).
+  const cacheKey = String(state.currentId);
+  if (!_intraVecCache.has(cacheKey)) _intraVecCache.set(cacheKey, new Map());
+  const sentCache = _intraVecCache.get(cacheKey);
+
+  const vectors = [];
+  for (const s of sents) {
+    if (!sentCache.has(s.text)) {
+      try {
+        const vec = await embed(s.text);
+        sentCache.set(s.text, vec);
+      } catch (_) {
+        sentCache.set(s.text, new Array(384).fill(0));
+      }
+    }
+    vectors.push(sentCache.get(s.text));
+  }
+
+  if (intraPane) intraPane.classList.remove("intra-busy");
+
+  const gran = Number($("#intraGran")?.value ?? 1);
+  const thresh = Number($("#intraThreshold")?.value ?? 0.55);
+  const { nodes, edges } = buildIntraGraph(sents, vectors, { granularity: gran, threshold: thresh, topK: 3 });
+
+  // Lazily create (or reuse) the renderer.
+  const canvas = $("#intraCanvas");
+  if (!_intraInstance && canvas) {
+    _intraInstance = createIntraGraph(canvas, {
+      onNodeClick: (n) => {
+        bodyEl.focus();
+        bodyEl.setSelectionRange(n.start, n.end);
+      },
+    });
+  }
+  if (_intraInstance) {
+    _intraInstance.setData(nodes, edges);
+    _intraInstance.resize();
+  }
+}
+
+function scheduleIntraRefresh() {
+  clearTimeout(_intraRefreshTimer);
+  _intraRefreshTimer = setTimeout(refreshIntraGraph, 400);
 }
 
 // ------------------------------------------------------------- self-update
@@ -425,6 +724,12 @@ async function checkForUpdates(manual = false) {
 // there's a session. Email delivery, verification, MFA etc. are all Clerk's.
 async function requireAuth() {
   const screen = $("#authScreen");
+  // desktop users can bail back to local notes from the sign-in screen
+  const escape = $("#authUseLocal");
+  if (escape) {
+    if (CONFIG.platform === "desktop") escape.onclick = () => { localStorage.setItem(MODE_KEY, "local"); location.reload(); };
+    else escape.classList.add("hidden");
+  }
   screen.hidden = false;
   await api.mountAuth($("#clerkAuth"));
   screen.hidden = true;
@@ -433,28 +738,45 @@ async function requireAuth() {
 // -------------------------------------------------------- vaults (web only)
 const NEW_VAULT = "__newv__";
 
-async function loadVaults() {
-  const list = await api.vaults();
-  const sel = $("#vaultSelect");
+// The active vault is shown in two places — the sidebar and the editor bar.
+const vaultSelectors = () => [$("#vaultSelect"), $("#editorVaultSelect")].filter(Boolean);
+
+function fillVaultSelect(sel, list, current) {
   sel.innerHTML = "";
   for (const v of list) sel.appendChild(new Option(v.name + (v.mine ? "" : " (shared)"), v.id));
   sel.appendChild(new Option("＋ New vault…", NEW_VAULT));
-  sel.value = api.currentVault() ?? list[0]?.id ?? "";
+  sel.value = current;
+}
+
+async function loadVaults() {
+  const list = await api.vaults();
   state.vaults = list;
+  const current = api.currentVault() ?? list[0]?.id ?? "";
+  for (const sel of vaultSelectors()) fillVaultSelect(sel, list, current);
 }
 
 async function switchVault(id) {
+  const current = api.currentVault() || "";
+  if (id === current) return;
+  await flushSave(); // persist pending edits while vaultId still points at the old vault
+
   if (id === NEW_VAULT) {
     const name = (prompt("New vault name:") || "").trim();
-    if (!name) { $("#vaultSelect").value = api.currentVault() || ""; return; }
+    if (!name) { for (const s of vaultSelectors()) s.value = current; return; }
     await api.createVault(name);
     await loadVaults();
   } else {
     await api.setVault(id);
+    for (const s of vaultSelectors()) s.value = id;
   }
+
   state.currentId = null; state.currentGroup = ""; state.dirty = false;
   titleEl.value = ""; bodyEl.value = ""; renderPreview(); suggestionsEl.innerHTML = "";
   await refreshNotes();
+  // if the graph is open, rebuild it for the new vault
+  if ($("#graphView").classList.contains("active")) {
+    loadGraph(Number($("#threshold").value), openGraphNode);
+  }
   indexMissing();
 }
 
@@ -535,7 +857,7 @@ function wire() {
     titleEl.focus();
   };
   titleEl.oninput = () => { scheduleSave(); };
-  bodyEl.oninput = () => { renderPreview(); scheduleSave(); };
+  bodyEl.oninput = () => { schedulePreview(); scheduleSave(); scheduleIntraRefresh(); };
 
   // grouping
   groupSelect.onchange = changeGroup;
@@ -544,10 +866,47 @@ function wire() {
   $("#attachImgBtn").onclick = () => $("#imgFileInput").click();
   $("#imgFileInput").onchange = (e) => { handleImageFiles(e.target.files); e.target.value = ""; };
 
+  initEditorSplit();
+  initSidebarSplit();
+
   // OCR ("Scan text"): only shown when the adapter supports it (web)
   $("#ocrBtn").classList.toggle("hidden", !api.ocrAvailable);
   $("#ocrBtn").onclick = () => $("#ocrFileInput").click();
-  $("#ocrFileInput").onchange = (e) => { runOcr(e.target.files[0]); e.target.value = ""; };
+  $("#ocrFileInput").onchange = (e) => { runOcr(e.target.files); e.target.value = ""; };
+
+  // Attachments
+  $("#attachBtn").onclick = () => $("#attachFileInput").click();
+  $("#attachFileInput").onchange = async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    const btn = $("#attachBtn");
+    if (!files.length || state.currentId == null) return;
+    btn.disabled = true;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      setStatus(`uploading ${f.name} (${i + 1}/${files.length})…`, true);
+      try {
+        const url = await api.upload(f);
+        await api.addAttachment(state.currentId, { url, name: f.name, mime: f.type });
+      } catch (err) {
+        setStatus("attach failed: " + err.message);
+      }
+    }
+    setStatus("attached");
+    setTimeout(() => setStatus(""), 1200);
+    renderAttachments(state.currentId);
+  };
+
+  // Intra-note graph controls
+  initPreviewSplit();
+  $("#intraToggle").onchange = scheduleIntraRefresh;
+  $("#intraGran").oninput = scheduleIntraRefresh;
+  $("#intraThreshold").oninput = (e) => {
+    const val = Number(e.target.value).toFixed(2);
+    const label = $("#intraThVal");
+    if (label) label.textContent = val;
+    scheduleIntraRefresh();
+  };
   bodyEl.addEventListener("paste", (e) => {
     const files = [...(e.clipboardData?.items || [])]
       .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
@@ -566,21 +925,25 @@ function wire() {
   $("#searchBtn").onclick = runSearch;
   $("#checkUpdateBtn").onclick = () => checkForUpdates(true);
 
-  // web-only chrome
+  // cloud-mode chrome
   $("#vaultSelect").onchange = (e) => switchVault(e.target.value);
+  $("#editorVaultSelect").onchange = (e) => switchVault(e.target.value);
   $("#shareVaultBtn").onclick = openShareDialog;
-  $("#signOutBtn").onclick = async () => { await api.signOut(); location.reload(); };
+  $("#signOutBtn").onclick = async () => { await api.signOut(); localStorage.setItem(MODE_KEY, "local"); location.reload(); };
+  initModeToggle();
   $("#searchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") runSearch();
     if (e.key === "Escape") { e.target.value = ""; renderNoteList(); }
   });
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => switchView(t.dataset.view)));
   $("#themeBtn").onclick = toggleTheme;
+  let thresholdTimer = null;
   $("#threshold").addEventListener("input", (e) => {
-    $("#thVal").textContent = Number(e.target.value).toFixed(2);
-    loadGraph(Number(e.target.value), (id) => { switchView("editor"); selectNote(id); });
+    $("#thVal").textContent = Number(e.target.value).toFixed(2); // label updates live
+    clearTimeout(thresholdTimer); // but only refetch the graph once the slider settles
+    thresholdTimer = setTimeout(() => loadGraph(Number(e.target.value), openGraphNode), 250);
   });
-  $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), (id) => { switchView("editor"); selectNote(id); });
+  $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), openGraphNode);
 
   // delete current note with Ctrl+Shift+Backspace (now with a confirmation)
   document.addEventListener("keydown", (e) => {
@@ -590,18 +953,21 @@ function wire() {
       deleteNoteFlow(state.currentId, n?.title);
     }
   });
-  window.addEventListener("resize", resizeGraph);
+  window.addEventListener("resize", () => { resizeGraph(); if (_intraInstance) _intraInstance.resize(); });
   window.addEventListener("beforeunload", flushSave);
 }
 
 // ------------------------------------------------------------------- boot
 async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "paper");
+  const mode = currentMode();
   document.body.dataset.platform = CONFIG.platform;
-  api = await loadApi();
-  setGraphSource((threshold) => api.graph(threshold));
+  document.body.dataset.mode = mode; // drives cloud-only / local-only chrome
+  api = await loadApi(mode);
+  // cloud shows every vault (userGraph); local is single-vault (graph)
+  setGraphSource((threshold) => (api.userGraph ? api.userGraph(threshold) : api.graph(threshold)));
 
-  if (CONFIG.platform === "web") {
+  if (mode === "cloud") {
     const session = await api.init();
     if (!session.authed) await requireAuth();
   }
@@ -610,8 +976,14 @@ async function boot() {
   initGraph($("#graphCanvas"), $("#graphEmpty"));
   initEmbedder();
 
-  if (CONFIG.platform === "web") {
+  if (mode === "cloud") {
     await loadVaults();
+    // first-ever login: mint exactly one personal vault (done here, once, so
+    // it can't race into duplicates from repeated vaults() calls)
+    if (!state.vaults.length) {
+      await api.createVault("Personal");
+      await loadVaults();
+    }
     $("#vecBadge").textContent = "cloud: supabase";
   } else {
     const h = await api.health().catch(() => ({ vec: false }));
@@ -627,7 +999,7 @@ async function boot() {
     } catch { /* viewer role — fine */ }
   }
   indexMissing(); // embed anything not yet in the vector db (background)
-  if (CONFIG.platform === "desktop") {
+  if (CONFIG.platform === "desktop" && mode === "local") {
     initVersion();
     checkForUpdates(false); // silent update check on launch
   }
