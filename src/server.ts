@@ -16,6 +16,9 @@ import {
   setUserLinks,
   storeEmbedding,
   knn,
+  listAttachments,
+  addAttachment,
+  removeAttachment,
 } from "./store";
 import { initVault, writeNoteFile, deleteNoteFile, parseWikilinks } from "./vault";
 import { buildGraph, suggestFor } from "./graph";
@@ -54,6 +57,18 @@ const json = (data: unknown, status = 200) =>
 // with it the renderer's cached embedding model — survives restarts.
 const DEFAULT_PORT = 47821;
 
+// Built once: the desktop platform config + optional cloud creds. The keys are
+// publishable/public by design (RLS is the security boundary).
+const cloudCreds =
+  process.env.SUPABASE_URL && (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY) && process.env.CLERK_PUBLISHABLE_KEY
+    ? {
+        supabaseUrl: process.env.SUPABASE_URL,
+        supabaseKey: process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY,
+        clerkPublishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+      }
+    : null;
+const desktopConfigJs = `window.CB_CONFIG = ${JSON.stringify({ platform: "desktop", cloud: cloudCreds })};`;
+
 // keep the on-disk markdown + user links in sync after a body change
 async function syncDerived(id: number, title: string, body: string) {
   setUserLinks(id, parseWikilinks(body));
@@ -75,9 +90,11 @@ export function startServer(uiDir = defaultUiDir) {
       try {
         // ---- API ----
         // Platform config consumed by the shared UI before app.js loads.
-        // The web deployment (web/server.ts) serves its own with supabase creds.
+        // `cloud` is present only when the (public) Supabase/Clerk keys are
+        // available (dev: .env; release: baked in at build) — that unlocks the
+        // desktop's optional cloud-account mode. Absent → the app is local-only.
         if (path === "/config.js") {
-          return new Response(`window.CB_CONFIG = { platform: "desktop" };`, {
+          return new Response(desktopConfigJs, {
             headers: { "content-type": "text/javascript; charset=utf-8" },
           });
         }
@@ -125,6 +142,26 @@ export function startServer(uiDir = defaultUiDir) {
             deleteNoteFile(id);
             return json({ ok: true });
           }
+        }
+
+        // attachment metadata (not file bytes — those go through /api/upload)
+        const attachNoteMatch = path.match(/^\/api\/notes\/(\d+)\/attachments$/);
+        if (attachNoteMatch) {
+          const noteId = Number(attachNoteMatch[1]);
+          if (req.method === "GET") {
+            return json(listAttachments(noteId));
+          }
+          if (req.method === "POST") {
+            const b = (await req.json()) as any;
+            const result = addAttachment(noteId, { url: b.url, name: b.name, mime: b.mime });
+            return json(result);
+          }
+        }
+
+        const attachMatch = path.match(/^\/api\/attachments\/(\d+)$/);
+        if (attachMatch && req.method === "DELETE") {
+          const id = Number(attachMatch[1]);
+          return json(removeAttachment(id));
         }
 
         // image upload: raw image bytes in the body, content-type sets the kind.

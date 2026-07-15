@@ -9,3 +9,4 @@ packaging/windows/icon.ico
 .env
 ui/config.js
 .vercel
+.claude/

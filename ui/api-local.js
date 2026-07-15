@@ -41,11 +41,31 @@ export function createApi() {
       return (await fetch(`/api/graph?threshold=${threshold}`)).json();
     },
 
+    // ---- attachments ----
+    async listAttachments(noteId) {
+      return (await fetch(`/api/notes/${noteId}/attachments`)).json();
+    },
+    async addAttachment(noteId, { url, name, mime }) {
+      return (await fetch(`/api/notes/${noteId}/attachments`, {
+        method: "POST",
+        headers: json(),
+        body: JSON.stringify({ url, name, mime }),
+      })).json();
+    },
+    async removeAttachment(id) {
+      return (await fetch(`/api/attachments/${id}`, { method: "DELETE" })).json();
+    },
+
     // ---- misc ----
     async upload(file) {
       const res = await fetch("/api/upload", { method: "POST", headers: { "content-type": file.type }, body: file });
+      if (!res.ok) {
+        let msg;
+        try { const d = await res.json(); msg = d.error || JSON.stringify(d); } catch { msg = await res.text().catch(() => ""); }
+        throw new Error(msg || `upload failed (${res.status})`);
+      }
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || `upload failed (${res.status})`);
+      if (data.error) throw new Error(data.error);
       return data.url;
     },
     ocrAvailable: false, // OCR runs in a cloud edge function (web only)
