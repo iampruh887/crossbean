@@ -401,6 +401,17 @@ export function clearFocus() {
   redraw();
 }
 
+// Edge (if any) between two note ids, either direction. Used to draw the
+// similarity line + % between two open graph mini-editors.
+export function edgeBetween(aId, bId) {
+  for (const e of edges) {
+    if ((e.source === aId && e.target === bId) || (e.source === bId && e.target === aId)) {
+      return { type: e.type, weight: e.weight ?? 0 };
+    }
+  }
+  return null;
+}
+
 // --------------------------------------------------------------- interaction
 function screenToWorld(sx, sy) {
   return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k };

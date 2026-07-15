@@ -1,5 +1,5 @@
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm";
-import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph, focusNode, clearFocus } from "/graph.js";
+import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph, focusNode, clearFocus, edgeBetween } from "/graph.js";
 import { splitSentences, buildIntraGraph } from "/chunk.js";
 import { createIntraGraph } from "/intra-graph.js";
 import { initMiniEditors } from "/mini-editor.js";
@@ -655,16 +655,31 @@ async function openGraphNode(node) {
   selectNote(id);
 }
 
+// Draw similarity lines + % between the currently-open (non-minimized) graph
+// minis, using the global graph's edges as the connection source.
+function refreshMiniConnections() {
+  if (!miniMgr) return;
+  const open = miniMgr.serialize().filter((w) => w.state !== "minimized");
+  const conns = [];
+  for (let i = 0; i < open.length; i++) {
+    for (let j = i + 1; j < open.length; j++) {
+      const e = edgeBetween(open[i].noteId, open[j].noteId);
+      if (e) conns.push({ a: open[i].noteId, b: open[j].noteId, sim: e.type === "user" ? 1 : e.weight });
+    }
+  }
+  miniMgr.setConnections(conns);
+}
+
 // Open a graph node click as a floating mini-editor (Q1 — default behaviour).
 function openMiniFromNode(node) {
   if (!miniMgr) { openGraphNode(node); return; }
-  miniMgr.openMini({
+  Promise.resolve(miniMgr.openMini({
     id: node.id,
     vault: node.vault ?? "",
     title: node.title ?? "",
     matchStart: node.matchStart ?? null,
     matchEnd: node.matchEnd ?? null,
-  });
+  })).then(refreshMiniConnections);
 }
 
 // Called by the mini's Expand button: open the full editor, optionally scroll
