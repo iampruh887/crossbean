@@ -1,7 +1,8 @@
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm";
-import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph } from "/graph.js";
+import { initGraph, loadGraph, resizeGraph, setGraphSource, stopGraph, focusNode, clearFocus } from "/graph.js";
 import { splitSentences, buildIntraGraph } from "/chunk.js";
 import { createIntraGraph } from "/intra-graph.js";
+import { initMiniEditors } from "/mini-editor.js";
 
 // ---------------------------------------------------------------- API client
 // The adapter is chosen at boot: the local HTTP engine (mode "local") or
@@ -53,6 +54,9 @@ function embed(text) {
 // ------------------------------------------------------------------- state/dom
 const $ = (s) => document.querySelector(s);
 const state = { notes: [], currentId: null, currentGroup: "", dirty: false, vaults: [] };
+
+// Mini-editor manager — initialised in boot() once api + DOM are ready.
+let miniMgr = null;
 
 const noteListEl = $("#noteList");
 const titleEl = $("#titleInput");
@@ -213,6 +217,7 @@ async function selectNote(id) {
   loadSuggestions(id);
   renderAttachments(id);
   scheduleIntraRefresh();
+  if ($("#graphView").classList.contains("active")) spotlightCurrent();
 }
 
 // Populate the editor's group picker: "No group", existing groups, "New group…".
@@ -243,11 +248,13 @@ async function changeGroup() {
   renderNoteList();      // reflect the move (and refresh the picker)
 }
 
-function renderPreview() {
-  const raw = bodyEl.value || "";
+// Render markdown text into an arbitrary element, including [[wikilink]] → link
+// substitution and click-binding. Used by both the main preview and mini-editors.
+export function renderMarkdownInto(el, text) {
+  const raw = text || "";
   const withLinks = raw.replace(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g, (_, t) => `[${t}](wikilink:${encodeURIComponent(t.trim())})`);
-  previewEl.innerHTML = marked.parse(withLinks, { breaks: true });
-  previewEl.querySelectorAll('a[href^="wikilink:"]').forEach((a) => {
+  el.innerHTML = marked.parse(withLinks, { breaks: true });
+  el.querySelectorAll('a[href^="wikilink:"]').forEach((a) => {
     a.classList.add("wikilink");
     a.onclick = (e) => {
       e.preventDefault();
@@ -257,7 +264,7 @@ function renderPreview() {
     };
   });
   // Post-process images: lazy load, ensure alt, broken-image placeholder.
-  previewEl.querySelectorAll("img").forEach((img) => {
+  el.querySelectorAll("img").forEach((img) => {
     img.loading = "lazy";
     if (!img.alt) img.alt = "image";
     img.onerror = () => {
@@ -269,6 +276,10 @@ function renderPreview() {
       } catch (_) { /* never throw */ }
     };
   });
+}
+
+function renderPreview() {
+  renderMarkdownInto(previewEl, bodyEl.value);
 }
 
 // Debounced markdown render — avoids re-parsing the whole body on every keystroke.
@@ -353,6 +364,15 @@ async function loadSuggestions(id) {
   }
 }
 
+// --------------------------------------------------------- cross-vault spotlight
+async function spotlightCurrent() {
+  if (state.currentId == null) return;
+  try {
+    const hits = await api.suggestCross(state.currentId, 8);
+    focusNode(state.currentId, hits.map((h) => h.id), hits);
+  } catch (_) { /* never break selection */ }
+}
+
 // ------------------------------------------------------------------- search
 async function runSearch() {
   const q = $("#searchInput").value.trim();
@@ -386,9 +406,10 @@ function switchView(view) {
   $("#graphView").classList.toggle("active", view === "graph");
   if (view === "graph") {
     resizeGraph();
-    loadGraph(Number($("#threshold").value), openGraphNode);
+    loadGraph(Number($("#threshold").value), openMiniFromNode).then(spotlightCurrent);
   } else {
     stopGraph(); // don't run the physics loop while the graph is hidden
+    if (view === "editor") clearFocus();
   }
 }
 
@@ -466,6 +487,28 @@ async function openGraphNode(node) {
   }
   switchView("editor");
   selectNote(id);
+}
+
+// Open a graph node click as a floating mini-editor (Q1 — default behaviour).
+function openMiniFromNode(node) {
+  if (!miniMgr) { openGraphNode(node); return; }
+  miniMgr.openMini({
+    id: node.id,
+    vault: node.vault ?? "",
+    title: node.title ?? "",
+    matchStart: node.matchStart ?? null,
+    matchEnd: node.matchEnd ?? null,
+  });
+}
+
+// Called by the mini's Expand button: open the full editor, optionally scroll
+// to the match range (mirrors the intra-graph node-click pattern, ~line 682).
+async function openMiniExpand(id, vault, matchStart, matchEnd) {
+  await openGraphNode({ id, vault });
+  if (matchStart != null) {
+    bodyEl.focus();
+    bodyEl.setSelectionRange(matchStart, matchEnd ?? matchStart);
+  }
 }
 
 // --------------------------------------------------------------- images
@@ -699,12 +742,12 @@ function showUpdateModal(info) {
   notesEl.textContent = notes.length > 600 ? notes.slice(0, 600) + "…" : notes;
   notesEl.style.display = notes ? "block" : "none";
   const modal = $("#updateModal");
-  const close = () => { modal.hidden = true; };
+  const close = () => { hideModal(modal); };
   $("#updateClose").onclick = close;
   modal.onclick = (e) => { if (e.target === modal) close(); };
   $("#updateDownload").onclick = () => window.open(info.downloadUrl || info.releaseUrl, "_blank", "noopener");
   $("#updateView").onclick = () => window.open(info.releaseUrl || info.downloadUrl, "_blank", "noopener");
-  modal.hidden = false;
+  showModal(modal);
 }
 
 // manual=true surfaces "up to date" / failure feedback; the boot check is silent.
@@ -730,9 +773,9 @@ async function requireAuth() {
     if (CONFIG.platform === "desktop") escape.onclick = () => { localStorage.setItem(MODE_KEY, "local"); location.reload(); };
     else escape.classList.add("hidden");
   }
-  screen.hidden = false;
+  showModal(screen);
   await api.mountAuth($("#clerkAuth"));
-  screen.hidden = true;
+  hideModal(screen);
 }
 
 // -------------------------------------------------------- vaults (web only)
@@ -775,7 +818,7 @@ async function switchVault(id) {
   await refreshNotes();
   // if the graph is open, rebuild it for the new vault
   if ($("#graphView").classList.contains("active")) {
-    loadGraph(Number($("#threshold").value), openGraphNode);
+    loadGraph(Number($("#threshold").value), openMiniFromNode);
   }
   indexMissing();
 }
@@ -814,10 +857,10 @@ async function openShareDialog() {
       render();
     } catch (err) { errEl.textContent = err.message; }
   };
-  $("#shareClose").onclick = () => { modal.hidden = true; };
-  modal.onclick = (e) => { if (e.target === modal) modal.hidden = true; };
+  $("#shareClose").onclick = () => { hideModal(modal); };
+  modal.onclick = (e) => { if (e.target === modal) hideModal(modal); };
   await render();
-  modal.hidden = false;
+  showModal(modal);
 }
 
 // --------------------------------------------------------- star-the-repo prompt
@@ -834,17 +877,35 @@ function maybeShowStarPrompt() {
   if (!first) { localStorage.setItem(FIRST_RUN_KEY, String(Date.now())); return; }
   if (Date.now() - first < STAR_DELAY) return;
   const modal = $("#starModal");
-  const done = (why) => { modal.hidden = true; localStorage.setItem(STAR_KEY, why); };
+  const done = (why) => { hideModal(modal); localStorage.setItem(STAR_KEY, why); };
   $("#starClose").onclick = () => done("dismissed");
   $("#starLater").onclick = () => done("dismissed");
   $("#starGo").onclick = () => { window.open(REPO_URL, "_blank", "noopener"); done("starred"); };
   modal.onclick = (e) => { if (e.target === modal) done("dismissed"); };
-  modal.hidden = false;
+  showModal(modal);
 }
 
 // ------------------------------------------------------------------- utils
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Hide the mini layer while a modal/auth overlay is visible (Q4).
+// Counts open modals so nested open/close pairs don't prematurely restore.
+let _modalDepth = 0;
+function showModal(el) {
+  _modalDepth++;
+  el.hidden = false;
+  const miniLayer = document.getElementById("miniLayer");
+  if (miniLayer) miniLayer.style.display = "none";
+}
+function hideModal(el) {
+  el.hidden = true;
+  _modalDepth = Math.max(0, _modalDepth - 1);
+  if (_modalDepth === 0) {
+    const miniLayer = document.getElementById("miniLayer");
+    if (miniLayer) miniLayer.style.display = "";
+  }
 }
 
 // ------------------------------------------------------------------- wiring
@@ -941,9 +1002,9 @@ function wire() {
   $("#threshold").addEventListener("input", (e) => {
     $("#thVal").textContent = Number(e.target.value).toFixed(2); // label updates live
     clearTimeout(thresholdTimer); // but only refetch the graph once the slider settles
-    thresholdTimer = setTimeout(() => loadGraph(Number(e.target.value), openGraphNode), 250);
+    thresholdTimer = setTimeout(() => loadGraph(Number(e.target.value), openMiniFromNode), 250);
   });
-  $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), openGraphNode);
+  $("#refreshGraph").onclick = () => loadGraph(Number($("#threshold").value), openMiniFromNode);
 
   // delete current note with Ctrl+Shift+Backspace (now with a confirmation)
   document.addEventListener("keydown", (e) => {
@@ -954,7 +1015,7 @@ function wire() {
     }
   });
   window.addEventListener("resize", () => { resizeGraph(); if (_intraInstance) _intraInstance.resize(); });
-  window.addEventListener("beforeunload", flushSave);
+  window.addEventListener("beforeunload", () => { flushSave(); persistMinis(); });
 }
 
 // ------------------------------------------------------------------- boot
@@ -975,6 +1036,13 @@ async function boot() {
   wire();
   initGraph($("#graphCanvas"), $("#graphEmpty"));
   initEmbedder();
+
+  // Mini-editor manager — must be created after DOM is ready and api is set.
+  miniMgr = initMiniEditors(document.body, {
+    noteLoader: (id) => api.noteAny ? api.noteAny(id) : api.note(id),
+    renderMarkdown: (el, md) => renderMarkdownInto(el, md),
+    onExpand: ({ id, vault, matchStart, matchEnd }) => openMiniExpand(id, vault, matchStart, matchEnd),
+  });
 
   if (mode === "cloud") {
     await loadVaults();
@@ -998,12 +1066,51 @@ async function boot() {
       await refreshNotes(id);
     } catch { /* viewer role — fine */ }
   }
+
+  // Restore persisted mini-windows for the current vault (Q5).
+  // Runs quietly after notes are ready; never crashes boot on load failure.
+  restorePersistedMinis().catch(() => {});
+
   indexMissing(); // embed anything not yet in the vector db (background)
   if (CONFIG.platform === "desktop" && mode === "local") {
     initVersion();
     checkForUpdates(false); // silent update check on launch
   }
   maybeShowStarPrompt();
+}
+
+// ----------------------------------------------------- mini persistence (Q5)
+const MINI_PERSIST_KEY = "cb-mini-windows";
+
+// Save the current set of open mini-windows to localStorage.
+function persistMinis() {
+  if (!miniMgr) return;
+  try {
+    const specs = miniMgr.serialize();
+    localStorage.setItem(MINI_PERSIST_KEY, JSON.stringify(specs));
+  } catch (_) { /* non-fatal */ }
+}
+
+// On boot, re-open windows that were open in the current vault last session.
+// Any window whose note fails to load is silently dropped.
+async function restorePersistedMinis() {
+  if (!miniMgr) return;
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(MINI_PERSIST_KEY) || "[]");
+  } catch (_) { return; }
+  if (!Array.isArray(saved) || !saved.length) return;
+
+  // Current vault id (null for desktop single-vault).
+  const currentVid = api.currentVault ? api.currentVault() : null;
+
+  for (const spec of saved) {
+    // Only restore windows for the current vault (Q5).
+    if (spec.vault && currentVid && spec.vault !== currentVid) continue;
+    try {
+      await miniMgr.openFromSaved(spec);
+    } catch (_) { /* note gone — skip silently */ }
+  }
 }
 
 const WELCOME = `# Welcome to crossbean

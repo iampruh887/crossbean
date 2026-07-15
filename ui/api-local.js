@@ -21,6 +21,7 @@ export function createApi() {
     // ---- notes ----
     async notes() { return (await fetch("/api/notes")).json(); },
     async note(id) { return (await fetch(`/api/notes/${id}`)).json(); },
+    async noteAny(id) { return this.note(id); }, // desktop is single-vault; note() already covers all notes
     async create(title, body, grp = "") {
       return (await fetch("/api/notes", { method: "POST", headers: json(), body: JSON.stringify({ title, body, grp }) })).json();
     },
@@ -37,6 +38,8 @@ export function createApi() {
       return (await fetch("/api/search", { method: "POST", headers: json(), body: JSON.stringify({ vector, k }) })).json();
     },
     async suggest(id) { return (await fetch(`/api/suggest/${id}`)).json(); },
+    async suggestCross(id, k = 8) { return this.suggest(id); },
+    async searchCross(vector, k = 8) { return this.search(vector, k); },
     async graph(threshold) {
       return (await fetch(`/api/graph?threshold=${threshold}`)).json();
     },
