@@ -154,12 +154,11 @@ body {
 :root[data-theme="terminal"] .n-vec-dot { border-radius: 0; }
 .n-vec-dot.off { background: var(--border-strong); }
 
-/* sidebar footer: version + update check */
+/* sidebar footer */
 .side-footer {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px 16px; border-top: 1px solid var(--border); flex: none;
 }
-.app-version { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
 .link-btn {
   background: none; border: none; color: var(--text-dim); cursor: pointer;
   font-size: 11.5px; font-family: var(--font-chrome); padding: 2px 4px;
@@ -332,13 +331,6 @@ body {
 
 .hidden { display: none !important; }
 
-/* Platform gating: /config.js sets body[data-platform] */
-/* Mode gating: body[data-mode] = local | cloud (set at boot by the adapter). */
-body[data-mode="local"] .cloud-only { display: none !important; }
-body[data-mode="cloud"] .local-only { display: none !important; }
-/* The Local↔Cloud switcher only makes sense on the desktop build. */
-body[data-platform="web"] .desktop-plat-only { display: none !important; }
-
 /* Vault switcher (web) */
 .vault-row { display: flex; gap: 6px; padding: 0 16px 10px; }
 .vault-row select {
@@ -416,12 +408,6 @@ body[data-platform="web"] .desktop-plat-only { display: none !important; }
 .modal-card p { margin: 0 0 22px; color: var(--text-dim); font-size: 13.5px; line-height: 1.65; }
 .modal-actions { display: flex; gap: 10px; justify-content: center; }
 .modal-actions .btn { width: auto; }
-.update-notes {
-  text-align: left; max-height: 180px; overflow-y: auto; margin: 0 0 20px;
-  padding: 10px 12px; background: var(--panel); border-radius: var(--radius);
-  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
-  white-space: pre-wrap; word-break: break-word;
-}
 
 /* Intra-note pane */
 #intraPane {

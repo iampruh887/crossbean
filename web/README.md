@@ -49,12 +49,12 @@ All three are publishable/public by design — RLS is the security boundary.
 ## Run it
 
 ```sh
-bun run web
+bun run start
 ```
 
 Open http://localhost:3000 — Clerk's sign-in screen gates the app. Sign up,
-and a "Personal" vault is created for you automatically. Deploy the same
-command on any host (a $5 VPS, Fly, Railway…) behind HTTPS.
+and a "Personal" vault is created for you automatically. Override the port
+with `PORT=<n> bun run start`.
 
 ## OCR ("Scan text") — optional
 
@@ -79,16 +79,22 @@ server-side). To enable it:
    (default is `Qwen/Qwen3-VL-30B-A3B-Instruct`).
 
 If the token/function aren't set up, the button just reports the error — the
-rest of the app is unaffected. OCR is web-only (the desktop app has no token).
+rest of the app is unaffected.
+
+## Deploy to Vercel
+
+Push the repo to GitHub, import it in Vercel, and set the three env vars
+(`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`) in the
+Vercel project settings. The `vercel.json` at the repo root handles the rest —
+`node scripts/gen-config.mjs` generates `ui/config.js` at build time, and
+Vercel serves `ui/` as a static site.
 
 ## Notes & trade-offs
 
-- **Embeddings still run in the browser** (Transformers.js worker) — the model
+- **Embeddings run in the browser** (Transformers.js worker) — the model
   (~30 MB) downloads once per browser and is cached. No GPU or AI keys needed.
 - **Invites need a known email**: you can only invite people who have signed
   in at least once (their email registers in `profiles` on first login).
 - **Attachments are public-read**: image URLs are unguessable (UUIDs) but not
   access-controlled — anyone with an exact URL can view that image. Don't paste
   secrets as screenshots into shared vaults.
-- **The desktop app is unchanged** and fully local. There is no sync between
-  desktop and web (yet) — they are separate stores.

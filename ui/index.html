@@ -21,7 +21,7 @@
           </div>
         </div>
 
-        <!-- Vault switcher (web only; desktop is single-vault) -->
+        <!-- Vault switcher -->
         <div class="vault-row cloud-only">
           <select id="vaultSelect" title="Switch vault"></select>
           <button id="shareVaultBtn" class="btn icon-btn" title="Share this vault">⇗</button>
@@ -39,10 +39,7 @@
         <div id="noteList" class="note-list"></div>
 
         <div class="side-footer">
-          <span id="appVersion" class="app-version local-only"></span>
-          <button id="checkUpdateBtn" class="link-btn local-only" title="Check GitHub for a newer version">Check for updates</button>
-          <button id="modeToggle" class="link-btn desktop-plat-only" title="Switch between local notes and your cloud account"></button>
-          <button id="signOutBtn" class="link-btn cloud-only" title="Sign out and return to local notes">Sign out</button>
+          <button id="signOutBtn" class="link-btn cloud-only" title="Sign out">Sign out</button>
         </div>
       </aside>
 
@@ -190,21 +187,6 @@
           <button type="submit" class="btn">Invite</button>
         </form>
         <div id="shareError" class="auth-error"></div>
-      </div>
-    </div>
-
-    <!-- Update-available prompt -->
-    <div id="updateModal" class="modal-backdrop" hidden>
-      <div class="modal-card">
-        <button class="modal-close" id="updateClose" title="Close">✕</button>
-        <div class="modal-emoji">🎉</div>
-        <h2>Update available</h2>
-        <p id="updateText"></p>
-        <pre id="updateNotes" class="update-notes"></pre>
-        <div class="modal-actions">
-          <button id="updateDownload" class="btn primary">Download</button>
-          <button id="updateView" class="btn">Release notes</button>
-        </div>
       </div>
     </div>
 

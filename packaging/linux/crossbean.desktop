@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=crossbean
-Comment=Local-first notes with an AI-powered knowledge graph
-Exec=/opt/crossbean/crossbean
-Icon=crossbean
-Terminal=false
-Categories=Office;Utility;
-Keywords=notes;markdown;knowledge;graph;
