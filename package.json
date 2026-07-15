@@ -1,20 +1,12 @@
 {
   "name": "crossbean",
   "version": "0.1.1",
-  "description": "Local-first desktop notes with an AI-powered knowledge graph",
+  "description": "Web notes with an AI-powered knowledge graph (Supabase + Clerk)",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "start": "bun run main.ts",
-    "dev": "bun --watch run main.ts",
-    "test": "bun run test-backend.ts",
-    "seed": "bun run scripts/seed.ts",
-    "build:release": "bun run scripts/build-release.ts",
-    "web": "bun run web/server.ts",
-    "web:dev": "bun --watch run web/server.ts"
-  },
-  "dependencies": {
-    "sqlite-vec": "^0.1.9",
-    "webview-bun": "^2.4.0"
+    "start": "bun run web/server.ts",
+    "dev": "bun --watch run web/server.ts",
+    "build": "node scripts/gen-config.mjs"
   }
 }

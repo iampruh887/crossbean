@@ -8,61 +8,52 @@ into a vector space; notes that talk about the same thing find each other. You
 still link by hand when you want to — the two kinds of connection are drawn
 side by side and color-coded.
 
-Non-goals (v0.1): sync, collaboration, plugins, mobile.
+Non-goals (v0.1): plugins, mobile.
 
 ## System overview
 
 ```
-┌────────────────────── native window (OS webview) ───────────────────────┐
-│  ui/app.js        editor · note list · semantic search · theming        │
-│  ui/graph.js      force-directed canvas graph                           │
-│  ui/embed-worker  all-MiniLM-L6-v2 on wasm (Transformers.js)            │
+┌──────────────────────────── browser ────────────────────────────────────┐
+│  ui/app.js          editor · note list · semantic search · theming      │
+│  ui/graph.js        force-directed canvas graph                         │
+│  ui/embed-worker    all-MiniLM-L6-v2 on wasm (Transformers.js)          │
+│  ui/api-supabase.js data adapter (supabase-js + Clerk JWT)              │
 └───────────────▲──────────────────────────────────────────────────────────┘
-                │ http (loopback only, ephemeral port)
-┌───────────────▼─────────────── bun process ──────────────────────────────┐
-│  main thread      webview.run() — blocking native event loop             │
-│  worker thread    Bun.serve engine                                       │
-│                   ├─ src/store.ts   sqlite + sqlite-vec (vector KNN)     │
-│                   ├─ src/graph.ts   edge derivation (user + AI)          │
-│                   └─ src/vault.ts   vault/*.md mirror + wikilink parse   │
+                │ HTTPS
+┌───────────────▼──────────────── Supabase ────────────────────────────────┐
+│  Postgres + pgvector    notes · links · embeddings (RLS-secured)         │
+│  Storage                attachments                                      │
+│  functions/ocr          optional image → text edge function              │
 └───────────────────────────────────────────────────────────────────────────┘
-```
 
-The window is a native OS webview (WebView2 / WebKitGTK / WKWebView) — not
-Electron, not a browser tab. The engine binds `127.0.0.1` on an ephemeral port
-and is only ever connected to by the app's own window.
+Static host: Vercel (production) or web/server.ts (local dev, Bun)
+Config: /config.js injects SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,
+        CLERK_PUBLISHABLE_KEY — all publishable; RLS is the security boundary.
+```
 
 ## Why the responsibilities sit where they do
 
-**Embedding runs in the renderer.** The natural place — next to the database —
-doesn't work: onnxruntime's native addon segfaults under Bun on Windows.
-Transformers.js on WebAssembly inside the webview is the reliable path, and it
-gives model caching (the OS webview's HTTP cache) for free. The renderer embeds
-text and POSTs the vector to the engine; the engine owns all persistence.
+**Embedding runs in the browser.** Transformers.js on WebAssembly inside
+`ui/embed-worker.js` is the reliable, dependency-free path: no server GPU, no
+AI keys, no onnxruntime native addon. The browser caches the model (~30 MB)
+after the first load. The adapter POSTs the 384-d vector to Supabase; Supabase
+owns all persistence.
 
-**The engine runs on a worker thread.** `webview.run()` blocks the main thread's
-event loop for the lifetime of the window. A same-thread `Bun.serve` accepts the
-socket but never runs its handler — the window white-screens waiting on a
-response that can't be scheduled. Discovered the hard way; see AGENTS.md for the
-other landmines.
-
-**SQLite is the source of truth; markdown is an export.** `vault/*.md` is
-regenerated on every save so the data outlives the app (openable in Obsidian or
-any editor), but the app never reads it back — no two-way sync conflicts.
+**Supabase is the source of truth.** Notes, links, embeddings, and attachments
+all live in Postgres + pgvector + Storage, protected by Row-Level Security keyed
+on the Clerk user id. There is no local file mirror or sqlite database.
 
 ## Data model
 
 ```sql
-notes      (id, title, body, updated)
-links      (src, dst)                  -- resolved [[wikilinks]], rebuilt on save
-embeddings (note_id, dim, data BLOB)   -- durable float32 vectors
-vec_notes  vec0(embedding float[384])  -- sqlite-vec index, cosine metric
+-- Supabase Postgres (see supabase/migrations/ for full DDL)
+notes      (id, vault_id, title, body, updated)
+links      (src, dst)                   -- resolved [[wikilinks]], rebuilt on save
+embeddings (note_id, embedding vector(384))  -- pgvector, cosine metric
 ```
 
-`embeddings` (plain table) is the durable copy; `vec_notes` (virtual table) is
-the fast index, rebuilt from `embeddings` at startup if missing. This means a
-build of the app without the native extension still works — `knn()` falls back
-to brute-force cosine over the BLOBs — and the index can always be regenerated.
+All tables are RLS-secured. The `embedding` column uses pgvector's `<=>` cosine
+operator for KNN queries — no separate index rebuild step needed.
 
 ## The graph
 
@@ -86,16 +77,17 @@ variables every frame, so the graph restyles instantly on theme toggle.
 ## Embedding pipeline
 
 ```
-save note ──▶ /api/notes PUT ──▶ sqlite + vault mirror
-        └──▶ renderer worker embeds title+body (384-d, normalized)
-                     └──▶ /api/embed POST ──▶ embeddings + vec_notes
-boot ──▶ indexMissing(): embed any note without a vector
-search ──▶ embed query in renderer ──▶ /api/search ──▶ KNN over vec_notes
+save note ──▶ adapter.saveNote() ──▶ Supabase Postgres
+        └──▶ embed-worker embeds title+body (384-d, normalized)
+                     └──▶ adapter.storeEmbedding() ──▶ Supabase pgvector
+on load ──▶ indexMissing(): embed any note without a vector
+search  ──▶ embed query in browser ──▶ adapter.search() ──▶ KNN via pgvector
 ```
 
 Model: `Xenova/all-MiniLM-L6-v2`, quantized ONNX (~30 MB), mean-pooled,
-normalized. Downloads once on first launch; cached by the webview thereafter
-(offline after that). Swapping models = changing `EMBED_DIM` + a re-index.
+normalized. Downloads once on first browser visit; cached by the browser
+thereafter. Swapping models = changing `EMBED_DIM` + a Supabase migration +
+a re-index.
 
 ## Theming
 
@@ -112,28 +104,22 @@ Two complete themes as CSS variable sets on `:root[data-theme=…]`:
 Choice persists in `localStorage`. Everything themable — including the canvas —
 derives from the variables; no theme logic lives in components.
 
-## Packaging model
+## Deployment model
 
-`bun build --compile` produces a single self-contained binary (bun runtime +
-bundled TS, including the server worker as a second entrypoint). Two native
-libraries ship next to it: `libwebview` and sqlite-vec's `vec0`. `src/paths.ts`
-switches the app between repo layout (dev) and executable-relative resources +
-OS-conventional data dir (installed).
-
-Because native libs are per-platform npm packages, each OS builds its own
-artifacts; `.github/workflows/release.yml` runs the matrix (Windows exe/installer,
-deb + rpm + tarball, macOS dmg for arm64 and x64) on a `v*` tag.
+There are no native libs, no compiled binary, and no per-platform builds.
+`vercel.json` points Vercel at `scripts/gen-config.mjs` (buildCommand) which
+writes `ui/config.js` from the three publishable env vars; Vercel serves
+`ui/` as a static site. Local dev uses `web/server.ts` (Bun) to do the same
+thing at runtime. Pushing to `main` triggers a Vercel deploy.
 
 ## Rejected alternatives
 
-- **Electron / Tauri** — Electron: 200 MB+ of Chromium per app and Node
-  (unavailable here); Tauri: needs a Rust toolchain. The OS webview + bun gets
-  the same result with two native libs.
-- **Embedding in the bun process** — segfaults (above). Also considered a
-  Python sidecar: heavy, second runtime to install.
-- **Dedicated vector DB (Qdrant/Chroma)** — a server process for a
-  single-user desktop app is operational overkill; sqlite-vec keeps vectors in
-  the same file as the notes, transactionally.
+- **Embedding server-side** — adds a GPU dependency and an AI key to the
+  server; the browser WebAssembly path is zero-cost operationally and cached
+  after first load.
+- **Dedicated vector DB (Qdrant/Chroma)** — a separate server process adds
+  operational complexity; pgvector keeps vectors in the same Postgres database
+  as the notes, transactionally, with RLS for free.
 - **Graph library (d3-force / cytoscape)** — the custom sim is ~200 lines,
   dependency-free, and trivially themeable.
 

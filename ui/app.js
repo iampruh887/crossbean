@@ -5,28 +5,15 @@ import { createIntraGraph } from "/intra-graph.js";
 import { initMiniEditors } from "/mini-editor.js";
 
 // ---------------------------------------------------------------- API client
-// The adapter is chosen at boot: the local HTTP engine (mode "local") or
-// Supabase (mode "cloud"). Web is always cloud; desktop remembers the user's
-// choice (default local) and can enter cloud mode only if the (public) keys
-// were provided via /config.js. Same adapter interface either way.
-const CONFIG = window.CB_CONFIG || { platform: "desktop" };
-const MODE_KEY = "cb-mode";
-const cloudCreds = CONFIG.platform === "web"
-  ? (CONFIG.supabaseUrl ? { supabaseUrl: CONFIG.supabaseUrl, supabaseKey: CONFIG.supabaseKey, clerkPublishableKey: CONFIG.clerkPublishableKey } : null)
-  : (CONFIG.cloud || null);
-function currentMode() {
-  if (CONFIG.platform === "web") return "cloud";
-  if (!cloudCreds) return "local";
-  return localStorage.getItem(MODE_KEY) === "cloud" ? "cloud" : "local";
-}
+// The adapter is always the Supabase/Clerk web adapter.
+const CONFIG = window.CB_CONFIG || {};
+const cloudCreds = CONFIG.supabaseUrl
+  ? { supabaseUrl: CONFIG.supabaseUrl, supabaseKey: CONFIG.supabaseKey, clerkPublishableKey: CONFIG.clerkPublishableKey }
+  : null;
 let api;
-async function loadApi(mode) {
-  if (mode === "cloud") {
-    const mod = await import("/api-supabase.js");
-    return mod.createApi({ platform: "web", ...cloudCreds });
-  }
-  const mod = await import("/api-local.js");
-  return mod.createApi(CONFIG);
+async function loadApi() {
+  const mod = await import("/api-supabase.js");
+  return mod.createApi({ platform: "web", ...cloudCreds });
 }
 
 // ------------------------------------------------------------ embedding client
@@ -96,17 +83,10 @@ function fatalError(err) {
     banner.className = "boot-error";
     document.body.appendChild(banner);
   }
-  // In cloud mode on desktop, offer a one-click drop back to offline Local mode.
-  const canFallback = CONFIG.platform === "desktop" && document.body.dataset.mode === "cloud";
   banner.innerHTML = `<b>Couldn't reach the backend.</b> <span class="be-msg"></span>` +
-    (canFallback ? `<button class="be-local">Use Local mode</button>` : "") +
     `<button class="be-x" title="dismiss">✕</button>`;
   banner.querySelector(".be-msg").textContent = msg;
   banner.querySelector(".be-x").onclick = () => banner.remove();
-  banner.querySelector(".be-local")?.addEventListener("click", () => {
-    localStorage.setItem(MODE_KEY, "local");
-    location.reload();
-  });
 }
 
 // --------------------------------------------------------------- note list UI
@@ -553,8 +533,7 @@ async function renderGraphTile() {
   };
   let data;
   try {
-    const src = api.userGraph ? api.userGraph : api.graph;
-    data = await src.call(api, Number($("#threshold")?.value ?? 0.3));
+    data = await api.userGraph(Number($("#threshold")?.value ?? 0.3));
   } catch (_) { placeholder(""); return; }
   const nodes = (data && data.nodes) || [];
   const edges = (data && (data.edges || data.links)) || [];
@@ -846,18 +825,6 @@ function initPaneToggles() {
   if (attChk) attChk.onchange = () => setPaneVisible("attach", attChk.checked);
 }
 
-// Desktop only: toggle between Local and Cloud-account mode (persist + reload).
-function initModeToggle() {
-  const btn = $("#modeToggle");
-  if (!btn) return;
-  if (CONFIG.platform !== "desktop" || !cloudCreds) { btn.classList.add("hidden"); return; }
-  const cloud = document.body.dataset.mode === "cloud";
-  btn.textContent = cloud ? "Use local notes" : "☁ Sign in to cloud";
-  btn.onclick = () => {
-    localStorage.setItem(MODE_KEY, cloud ? "local" : "cloud");
-    location.reload();
-  };
-}
 
 // Open a graph node in the editor. On the web multi-vault graph a node may live
 // in another vault — switch to it first, then open the note.
@@ -1167,53 +1134,12 @@ function scheduleIntraRefresh() {
   _intraRefreshTimer = setTimeout(refreshIntraGraph, 400);
 }
 
-// ------------------------------------------------------------- self-update
-async function initVersion() {
-  try {
-    const v = await api.version();
-    $("#appVersion").textContent = v.version === "web" ? "" : "v" + v.version;
-  } catch { /* offline / non-fatal */ }
-}
-
-function showUpdateModal(info) {
-  $("#updateText").innerHTML =
-    `crossbean <b>${escapeHtml(info.latest)}</b> is available — you have v${escapeHtml(info.current)}.`;
-  const notesEl = $("#updateNotes");
-  const notes = (info.notes || "").trim();
-  notesEl.textContent = notes.length > 600 ? notes.slice(0, 600) + "…" : notes;
-  notesEl.style.display = notes ? "block" : "none";
-  const modal = $("#updateModal");
-  const close = () => { hideModal(modal); };
-  $("#updateClose").onclick = close;
-  modal.onclick = (e) => { if (e.target === modal) close(); };
-  $("#updateDownload").onclick = () => window.open(info.downloadUrl || info.releaseUrl, "_blank", "noopener");
-  $("#updateView").onclick = () => window.open(info.releaseUrl || info.downloadUrl, "_blank", "noopener");
-  showModal(modal);
-}
-
-// manual=true surfaces "up to date" / failure feedback; the boot check is silent.
-async function checkForUpdates(manual = false) {
-  try {
-    if (manual) setStatus("checking for updates…", true);
-    const info = await api.updateCheck();
-    if (info.updateAvailable) showUpdateModal(info);
-    else if (manual) { setStatus(info.error ? "update check failed" : "up to date"); setTimeout(() => setStatus(""), 1600); }
-  } catch {
-    if (manual) { setStatus("update check failed"); setTimeout(() => setStatus(""), 1600); }
-  }
-}
 
 // ----------------------------------------------------------- auth (web only)
 // Shows the login screen (Clerk's prebuilt sign-in/up UI) and resolves once
 // there's a session. Email delivery, verification, MFA etc. are all Clerk's.
 async function requireAuth() {
   const screen = $("#authScreen");
-  // desktop users can bail back to local notes from the sign-in screen
-  const escape = $("#authUseLocal");
-  if (escape) {
-    if (CONFIG.platform === "desktop") escape.onclick = () => { localStorage.setItem(MODE_KEY, "local"); location.reload(); };
-    else escape.classList.add("hidden");
-  }
   showModal(screen);
   await api.mountAuth($("#clerkAuth"));
   hideModal(screen);
@@ -1455,14 +1381,12 @@ function wire() {
     if (e.dataTransfer?.files?.length) { e.preventDefault(); handleImageFiles(e.dataTransfer.files); }
   });
   $("#searchBtn").onclick = runSearch;
-  $("#checkUpdateBtn").onclick = () => checkForUpdates(true);
 
   // cloud-mode chrome
   $("#vaultSelect").onchange = (e) => switchVault(e.target.value);
   $("#editorVaultSelect").onchange = (e) => switchVault(e.target.value);
   $("#shareVaultBtn").onclick = openShareDialog;
-  $("#signOutBtn").onclick = async () => { await api.signOut(); localStorage.setItem(MODE_KEY, "local"); location.reload(); };
-  initModeToggle();
+  $("#signOutBtn").onclick = async () => { await api.signOut(); location.reload(); };
   $("#searchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") runSearch();
     if (e.key === "Escape") { e.target.value = ""; renderNoteList(); }
@@ -1502,17 +1426,13 @@ function wire() {
 // ------------------------------------------------------------------- boot
 async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "paper");
-  const mode = currentMode();
-  document.body.dataset.platform = CONFIG.platform;
-  document.body.dataset.mode = mode; // drives cloud-only / local-only chrome
-  api = await loadApi(mode);
-  // cloud shows every vault (userGraph); local is single-vault (graph)
-  setGraphSource((threshold) => (api.userGraph ? api.userGraph(threshold) : api.graph(threshold)));
+  document.body.dataset.platform = "web";
+  document.body.dataset.mode = "cloud";
+  api = await loadApi();
+  setGraphSource((threshold) => api.userGraph(threshold));
 
-  if (mode === "cloud") {
-    const session = await api.init();
-    if (!session.authed) await requireAuth();
-  }
+  const session = await api.init();
+  if (!session.authed) await requireAuth();
 
   wire();
   initGraph($("#graphCanvas"), $("#graphEmpty"));
@@ -1533,19 +1453,14 @@ async function boot() {
     onExpand: ({ id, vault, matchStart, matchEnd }) => openMiniExpand(id, vault, matchStart, matchEnd),
   });
 
-  if (mode === "cloud") {
+  await loadVaults();
+  // first-ever login: mint exactly one personal vault (done here, once, so
+  // it can't race into duplicates from repeated vaults() calls)
+  if (!state.vaults.length) {
+    await api.createVault("Personal");
     await loadVaults();
-    // first-ever login: mint exactly one personal vault (done here, once, so
-    // it can't race into duplicates from repeated vaults() calls)
-    if (!state.vaults.length) {
-      await api.createVault("Personal");
-      await loadVaults();
-    }
-    $("#vecBadge").textContent = "cloud: supabase";
-  } else {
-    const h = await api.health().catch(() => ({ vec: false }));
-    $("#vecBadge").textContent = h.vec ? "vector db: sqlite-vec" : "vector db: cosine";
   }
+  $("#vecBadge").textContent = "cloud: supabase";
 
   await refreshNotes();
   if (!state.notes.length) {
@@ -1566,10 +1481,6 @@ async function boot() {
   restorePersistedMinis().catch(() => {});
 
   indexMissing(); // embed anything not yet in the vector db (background)
-  if (CONFIG.platform === "desktop" && mode === "local") {
-    initVersion();
-    checkForUpdates(false); // silent update check on launch
-  }
   maybeShowStarPrompt();
 }
 
@@ -1595,7 +1506,6 @@ async function restorePersistedMinis() {
   } catch (_) { return; }
   if (!Array.isArray(saved) || !saved.length) return;
 
-  // Current vault id (null for desktop single-vault).
   const currentVid = api.currentVault ? api.currentVault() : null;
 
   for (const spec of saved) {
@@ -1609,7 +1519,7 @@ async function restorePersistedMinis() {
 
 const WELCOME = `# Welcome to crossbean
 
-This is a local-first notebook where your notes form a **knowledge graph**.
+crossbean is a notebook where your notes form a **knowledge graph**.
 
 Two kinds of connections show up in the **Graph** tab:
 
@@ -1618,6 +1528,6 @@ Two kinds of connections show up in the **Graph** tab:
 
 Try it: make a couple of notes on related topics and watch them connect — even without linking them by hand.
 
-Everything lives on your machine. Notes are mirrored to the \`vault/\` folder as plain markdown.`;
+Your notes live in your account and sync across devices.`;
 
 boot().catch(fatalError);

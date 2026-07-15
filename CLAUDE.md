@@ -6,13 +6,10 @@
 
 - Bun lives at `~/.bun/bin` and may not be on PATH in fresh shells:
   `export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH"`
-- The app opens a real window; launch it with `run_in_background` and find its
-  port with:
-  `powershell -Command "(Get-NetTCPConnection -State Listen -OwningProcess (Get-Process bun).Id | ? LocalAddress -eq '127.0.0.1').LocalPort"`
-  then `curl http://127.0.0.1:<port>/api/health` — expect `{"ok":true,"vec":true}`.
-  `vec:false` means sqlite-vec failed to load; check stdout for the reason.
-- To stop app instances:
-  `powershell -Command "Get-Process bun,crossbean,msedgewebview2 -EA SilentlyContinue | Stop-Process -Force"`
-- The embedding model (~30 MB) downloads on first window launch and caches in
-  the WebView2 profile (`%APPDATA%\bun.exe\EBWebView` in dev, `crossbean.exe`
-  host dir when compiled). Headless tests never need it.
+- Run the web host locally with `bun run start` (default port 3000; override
+  with `PORT=<n>`). Requires `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and
+  `CLERK_PUBLISHABLE_KEY` in `.env` at the repo root (bun auto-loads it).
+- Health check: `curl http://localhost:3000/healthz` — expect `{"ok":true}`.
+- The embedding model (~30 MB, `Xenova/all-MiniLM-L6-v2`) downloads on first
+  browser visit and is cached by the browser thereafter. It is not needed for
+  any server-side work.
