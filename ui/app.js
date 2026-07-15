@@ -501,7 +501,7 @@ function initWorkspaceSplits() {
     const key = div.dataset.split;
     const [leftKey, rightKey] = key.split("-");
     let dragging = false;
-    let startX, startLeftW, startRightW;
+    let startX, startRightW;
 
     div.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -511,7 +511,6 @@ function initWorkspaceSplits() {
       if (!elL || !elR) return;
       dragging = true;
       startX = e.clientX;
-      startLeftW  = elL.getBoundingClientRect().width;
       startRightW = elR.getBoundingClientRect().width;
       div.classList.add("dragging");
       document.body.style.userSelect = "none";
@@ -524,23 +523,14 @@ function initWorkspaceSplits() {
       const elL = workspace.querySelector(`.pane[data-pane="${leftKey}"]`);
       const elR = workspace.querySelector(`.pane[data-pane="${rightKey}"]`);
       if (!elL || !elR) return;
-      // Editor pane (leftKey="editor") has flex-grow:1; resize right only.
-      if (leftKey === "editor") {
-        const newR = Math.max(80, startRightW - delta);
-        elR.style.flexBasis = newR + "px";
-        const cur = loadPaneWidths();
-        cur[rightKey] = newR;
-        savePaneWidths(cur);
-      } else {
-        const newL = Math.max(80, startLeftW + delta);
-        const newR = Math.max(80, startRightW - delta);
-        elL.style.flexBasis = newL + "px";
-        elR.style.flexBasis = newR + "px";
-        const cur = loadPaneWidths();
-        cur[leftKey]  = newL;
-        cur[rightKey] = newR;
-        savePaneWidths(cur);
-      }
+      // Each divider owns the pane on its right. The editor has flex-grow and
+      // absorbs the remaining space, so every optional pane can be resized
+      // without changing a neighboring pane's saved width.
+      const newR = Math.max(80, startRightW - delta);
+      elR.style.flexBasis = newR + "px";
+      const cur = loadPaneWidths();
+      cur[rightKey] = newR;
+      savePaneWidths(cur);
       if (_intraInstance) _intraInstance.resize();
     });
 
