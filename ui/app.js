@@ -503,7 +503,8 @@ function initWorkspaceSplits() {
     let dragging = false;
     let startX, startLeftW, startRightW;
 
-    div.addEventListener("mousedown", (e) => {
+    div.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       const elL = workspace.querySelector(`.pane[data-pane="${leftKey}"]`);
       const elR = workspace.querySelector(`.pane[data-pane="${rightKey}"]`);
@@ -514,9 +515,10 @@ function initWorkspaceSplits() {
       startRightW = elR.getBoundingClientRect().width;
       div.classList.add("dragging");
       document.body.style.userSelect = "none";
+      div.setPointerCapture(e.pointerId);
     });
 
-    window.addEventListener("mousemove", (e) => {
+    div.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const delta = e.clientX - startX;
       const elL = workspace.querySelector(`.pane[data-pane="${leftKey}"]`);
@@ -542,12 +544,17 @@ function initWorkspaceSplits() {
       if (_intraInstance) _intraInstance.resize();
     });
 
-    window.addEventListener("mouseup", () => {
+    const stopDragging = (e) => {
       if (!dragging) return;
       dragging = false;
+      if (e?.pointerId != null && div.hasPointerCapture(e.pointerId)) {
+        div.releasePointerCapture(e.pointerId);
+      }
       div.classList.remove("dragging");
       document.body.style.userSelect = "";
-    });
+    };
+    div.addEventListener("pointerup", stopDragging);
+    div.addEventListener("pointercancel", stopDragging);
 
     // Double-click: reset both sides to their defaults.
     div.addEventListener("dblclick", () => {
