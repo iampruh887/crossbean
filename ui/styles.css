@@ -208,7 +208,7 @@ body {
 #groupSelect:focus, #editorVaultSelect:focus { outline: none; border-color: var(--accent); }
 #groupSelect:disabled { opacity: .5; cursor: default; }
 .bar-btn { padding: 5px 10px; font-size: 12.5px; }
-/* ---- Workspace: horizontal multi-pane layout ---- */
+/* ---- Related and Attachments workspace panes ---- */
 .workspace {
   flex: 1;
   display: flex;
@@ -246,71 +246,19 @@ body {
 }
 .workspace .workspace-split.split-hidden { display: none; }
 
-/* ---- Floating panels (Related / Attachments) ---- */
-.float-panel {
-  position: fixed;
-  z-index: 70;
-  min-width: 220px;
-  min-height: 160px;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 6px 28px rgba(0, 0, 0, .22), 0 2px 8px rgba(0, 0, 0, .12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  resize: both;
-}
-.float-panel[hidden] { display: none; }
-
-/* Drag titlebar */
-.float-drag {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 6px 5px 10px;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
-  cursor: move;
-  user-select: none;
-  flex: none;
-}
-.float-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12.5px;
-  font-weight: 600;
-  font-family: var(--font-content);
-  color: var(--text);
-}
-:root[data-theme="paper"] .float-title { font-weight: 500; }
-
-.float-close {
-  flex: none;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 3px 6px;
-  border-radius: var(--radius);
-  font-family: var(--font-chrome);
-  transition: color .1s, background .1s;
-}
-.float-close:hover { color: var(--danger); background: var(--panel); }
-
-/* Scrollable inner body — must have overflow so resize:both works */
-.float-body {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+/* ---- Workspace: horizontal multi-pane layout ---- */
+.workspace .pane[data-pane="intra"] {
+  flex-basis: var(--wp-intra, 0);
   display: flex;
   flex-direction: column;
 }
+.workspace .pane[data-pane="intra"].pane-hidden { display: none; }
+.workspace .pane[data-pane="attach"] {
+  flex-basis: var(--wp-attach, 0);
+  display: flex;
+  flex-direction: column;
+}
+.workspace .pane[data-pane="attach"].pane-hidden { display: none; }
 .body-input {
   background: var(--bg); border: none; resize: none; color: var(--text);
   font-family: var(--font-content); font-size: 15px; line-height: 1.8;
@@ -474,7 +422,7 @@ body[data-platform="web"] .desktop-plat-only { display: none !important; }
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* Intra-note pane — lives inside .float-body now */
+/* Intra-note pane */
 #intraPane {
   display: flex;
   flex-direction: column;
@@ -554,7 +502,7 @@ body[data-platform="web"] .desktop-plat-only { display: none !important; }
 }
 #intraPane { position: relative; }
 
-/* Attachments section (floating panel) */
+/* Attachments section */
 .attachments {
   display: flex;
   align-items: flex-start;
