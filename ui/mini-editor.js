@@ -320,6 +320,45 @@ export function initMiniEditors(hostEl, { noteLoader, renderMarkdown, onExpand }
     uidSeq = 0;
   }
 
+  // ---- serialize -------------------------------------------------------------
+  // Returns a plain-object array suitable for JSON serialisation, one entry per
+  // currently open (or minimized) window.  The shape matches the `spec` accepted
+  // by openFromSaved() so callers can round-trip without knowing internals.
+  function serialize() {
+    return windows.map((win) => ({
+      noteId: win.noteId,
+      vault:  win.vault,
+      title:  win.title,
+      x: win.x, y: win.y, w: win.w, h: win.h,
+      state: win.state,
+      matchStart: win.matchStart,
+      matchEnd:   win.matchEnd,
+    }));
+  }
+
+  // ---- openFromSaved ---------------------------------------------------------
+  // Re-open a window from a serialised spec (e.g. from localStorage).
+  // Returns the same Promise<win> as openMini so callers can await and catch.
+  async function openFromSaved(spec) {
+    const { noteId, vault, title, x, y, w, h, state: savedState, matchStart, matchEnd } = spec ?? {};
+    const win = await openMini({ id: noteId, vault, title, matchStart, matchEnd });
+
+    // Restore position + size from the saved spec if they look reasonable.
+    if (typeof x === "number" && typeof y === "number") {
+      win.x = x; win.y = y;
+      win.el.style.left = x + "px";
+      win.el.style.top  = y + "px";
+    }
+    if (typeof w === "number" && typeof h === "number") {
+      win.w = w; win.h = h;
+      win.el.style.width  = w + "px";
+      win.el.style.height = h + "px";
+    }
+    if (savedState === "minimized") minimize(win.uid);
+
+    return win;
+  }
+
   // ---- public API ------------------------------------------------------------
   return {
     /**
@@ -352,5 +391,16 @@ export function initMiniEditors(hostEl, { noteLoader, renderMarkdown, onExpand }
      * Remove all windows and both layer elements; safe to call before re-init.
      */
     destroyAll,
+    /**
+     * Return a serialisable snapshot of all open windows (for localStorage).
+     * @returns {Array<{noteId, vault, title, x, y, w, h, state, matchStart, matchEnd}>}
+     */
+    serialize,
+    /**
+     * Re-open a window from a saved spec (round-trip with serialize()).
+     * @param {object} spec
+     * @returns {Promise<object>} the window record
+     */
+    openFromSaved,
   };
 }

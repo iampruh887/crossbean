@@ -21,6 +21,7 @@ export function createApi() {
     // ---- notes ----
     async notes() { return (await fetch("/api/notes")).json(); },
     async note(id) { return (await fetch(`/api/notes/${id}`)).json(); },
+    async noteAny(id) { return this.note(id); }, // desktop is single-vault; note() already covers all notes
     async create(title, body, grp = "") {
       return (await fetch("/api/notes", { method: "POST", headers: json(), body: JSON.stringify({ title, body, grp }) })).json();
     },
