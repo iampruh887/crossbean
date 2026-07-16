@@ -1005,6 +1005,84 @@ async function runOcr(filesOrFile) {
   }
 }
 
+// -------------------------------------------------------------------- PDF import
+// Pull text out of a PDF page-by-page. Digital pages use the embedded text layer
+// (instant, exact); scanned / image-only pages are rasterised and run through
+// the same OCR pipeline as "Scan text". pdf.js ships prebuilt ESM, so we load
+// its build files (not the /+esm transform) from the same jsDelivr CDN.
+const PDFJS_VER = "4.7.76";
+let _pdfjsPromise = null;
+function loadPdfjs() {
+  if (!_pdfjsPromise) {
+    _pdfjsPromise = import(`https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VER}/build/pdf.min.mjs`)
+      .then((pdfjs) => {
+        pdfjs.GlobalWorkerOptions.workerSrc =
+          `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VER}/build/pdf.worker.min.mjs`;
+        return pdfjs;
+      });
+  }
+  return _pdfjsPromise;
+}
+
+// Reconstruct a page's text from its content items, using pdf.js's own EOL hints.
+function pageTextLayer(textContent) {
+  let s = "";
+  for (const it of textContent.items) {
+    s += it.str || "";
+    if (it.hasEOL) s += "\n";
+  }
+  return s.replace(/[ \t]+\n/g, "\n").trim();
+}
+
+// Rasterise a PDF page to a PNG File so it can go through api.ocr().
+async function pageToImageFile(page, name) {
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d");
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  return new File([blob], name, { type: "image/png" });
+}
+
+// PDF → markdown text (hybrid). A page whose text layer is essentially empty is
+// treated as a scan and OCR'd. onPage(i, n, mode) reports progress ("text"|"ocr").
+const PDF_MIN_TEXT = 16; // fewer real chars than this ⇒ treat the page as a scan
+async function pdfToText(file, onPage) {
+  const pdfjs = await loadPdfjs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const n = pdf.numPages;
+  const base = file.name.replace(/\.[^.]+$/, "");
+  const pages = [];
+  try {
+    for (let i = 1; i <= n; i++) {
+      const page = await pdf.getPage(i);
+      let text = "";
+      try { text = pageTextLayer(await page.getTextContent()); } catch { text = ""; }
+      const needsOcr = text.replace(/\s/g, "").length < PDF_MIN_TEXT;
+      if (needsOcr && api.ocrAvailable) {
+        onPage?.(i, n, "ocr");
+        try {
+          const img = await pageToImageFile(page, `${base}-p${i}.png`);
+          const ocrText = (await api.ocr(img)).trim();
+          if (ocrText.length >= text.length) text = ocrText;
+        } catch (e) {
+          console.error(`[crossbean] PDF page ${i} OCR failed:`, e);
+        }
+      } else {
+        onPage?.(i, n, "text");
+      }
+      if (text) pages.push(text);
+      page.cleanup?.();
+    }
+  } finally {
+    await pdf.destroy?.();
+  }
+  return pages.join("\n\n");
+}
+
 // ----------------------------------------------------------------- attachments
 async function renderAttachments(noteId) {
   const listEl = $("#attachList");
@@ -1306,7 +1384,7 @@ function wire() {
   $("#ocrBtn").onclick = () => $("#ocrFileInput").click();
   $("#ocrFileInput").onchange = (e) => { runOcr(e.target.files); e.target.value = ""; };
 
-  // Import file as new note (txt / md / docx)
+  // Import file as new note (txt / md / docx / pdf)
   $("#importBtn").onclick = () => $("#importFileInput").click();
   $("#importFileInput").onchange = async (e) => {
     const file = e.target.files[0];
@@ -1317,7 +1395,11 @@ function wire() {
     setStatus(`importing ${file.name}…`, true);
     try {
       let body = "";
-      if (ext === "docx") {
+      if (ext === "pdf") {
+        body = await pdfToText(file, (i, n, mode) =>
+          setStatus(`importing ${file.name}… ${mode === "ocr" ? "OCR " : ""}page ${i}/${n}`, true));
+        if (!body.trim()) { setStatus("import failed: no text found in PDF"); return; }
+      } else if (ext === "docx") {
         const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.6.0/+esm");
         const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
         body = result.value || "";
@@ -1325,6 +1407,13 @@ function wire() {
         body = await file.text();
       }
       const { id } = await api.create(title, body, state.currentGroup || "");
+      // Keep the source PDF alongside the note (mirrors Scan-text behaviour).
+      if (ext === "pdf") {
+        try {
+          const url = await api.upload(file);
+          await api.addAttachment(id, { url, name: file.name, mime: file.type || "application/pdf" });
+        } catch (attErr) { console.error("[crossbean] PDF source attach failed:", attErr); }
+      }
       setStatus("imported");
       setTimeout(() => setStatus(""), 1500);
       await refreshNotes(id);
